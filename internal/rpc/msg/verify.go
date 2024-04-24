@@ -129,6 +129,7 @@ func (m *msgServer) messageVerification(ctx context.Context, data *msg.SendMsgRe
 }
 
 func (m *msgServer) encapsulateMsgData(msg *sdkws.MsgData) {
+	// 生成msg id md5(时间 + send id + 随机数)
 	msg.ServerMsgID = GetMsgID(msg.SendID)
 	if msg.SendTime == 0 {
 		msg.SendTime = timeutil.GetCurrentTimestampByMill()
@@ -155,9 +156,11 @@ func (m *msgServer) encapsulateMsgData(msg *sdkws.MsgData) {
 	case constant.Custom:
 		fallthrough
 	case constant.Quote:
+		// 撤回 -- 设置msg option供后续发送消息判断
 	case constant.Revoke:
 		datautil.SetSwitchFromOptions(msg.Options, constant.IsUnreadCount, false)
 		datautil.SetSwitchFromOptions(msg.Options, constant.IsOfflinePush, false)
+		// 已读回执
 	case constant.HasReadReceipt:
 		datautil.SetSwitchFromOptions(msg.Options, constant.IsConversationUpdate, false)
 		datautil.SetSwitchFromOptions(msg.Options, constant.IsSenderConversationUpdate, false)

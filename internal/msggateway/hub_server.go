@@ -119,6 +119,7 @@ func (s *Server) OnlineBatchPushOneMsg(ctx context.Context, req *msggateway.Onli
 	return nil, nil
 }
 
+// SuperGroupOnlineBatchPushOneMsg 把这条消息推给user ids
 func (s *Server) SuperGroupOnlineBatchPushOneMsg(ctx context.Context, req *msggateway.OnlineBatchPushOneMsgReq,
 ) (*msggateway.OnlineBatchPushOneMsgResp, error) {
 	var singleUserResults []*msggateway.SingleMsgToUserResults
@@ -127,6 +128,7 @@ func (s *Server) SuperGroupOnlineBatchPushOneMsg(ctx context.Context, req *msgga
 		results := &msggateway.SingleMsgToUserResults{
 			UserID: v,
 		}
+		// 获取当前用户在该节点上的所有连接client
 		clients, ok := s.LongConnServer.GetUserAllCons(v)
 		if !ok {
 			log.ZDebug(ctx, "push user not online", "userID", v)
@@ -146,6 +148,7 @@ func (s *Server) SuperGroupOnlineBatchPushOneMsg(ctx context.Context, req *msgga
 			}
 			if !client.IsBackground ||
 				(client.IsBackground && client.PlatformID != constant.IOSPlatformID) {
+				// 写入websocket
 				err := client.PushMessage(ctx, req.MsgData)
 				if err != nil {
 					userPlatform.ResultCode = int64(servererrs.ErrPushMsgErr.Code())

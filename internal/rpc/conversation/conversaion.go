@@ -327,6 +327,7 @@ func (c *conversationServer) CreateSingleChatConversations(ctx context.Context,
 	req *pbconversation.CreateSingleChatConversationsReq,
 ) (*pbconversation.CreateSingleChatConversationsResp, error) {
 	switch req.ConversationType {
+	// 私聊场景在mongo db分别为发送者/接收者创建会话记录
 	case constant.SingleChatType:
 		var conversation tablerelation.ConversationModel
 		conversation.ConversationID = req.ConversationID

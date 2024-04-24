@@ -63,6 +63,7 @@ func NewDefaultAllNode(disCov discovery.SvcDiscoveryRegistry, config *Config) *D
 
 func (d *DefaultAllNode) GetConnsAndOnlinePush(ctx context.Context, msg *sdkws.MsgData,
 	pushToUserIDs []string) (wsResults []*msggateway.SingleMsgToUserResults, err error) {
+	// 获取系统重所有连接的node
 	conns, err := d.disCov.GetConns(ctx, d.config.Share.RpcRegisterName.MessageGateway)
 	log.ZDebug(ctx, "get gateway conn", "conn length", len(conns))
 	if err != nil {
@@ -83,9 +84,11 @@ func (d *DefaultAllNode) GetConnsAndOnlinePush(ctx context.Context, msg *sdkws.M
 	wg.SetLimit(maxWorkers)
 
 	// Online push message
+	// 遍历系统所有node进行全量推送 --- 存在惊群效应
 	for _, conn := range conns {
 		conn := conn // loop var safe
 		wg.Go(func() error {
+			// 对应当前模块对应当前node简历的rpc连接，调用msg-gate模块推送到用户
 			msgClient := msggateway.NewMsgGatewayClient(conn)
 			reply, err := msgClient.SuperGroupOnlineBatchPushOneMsg(ctx, input)
 			if err != nil {

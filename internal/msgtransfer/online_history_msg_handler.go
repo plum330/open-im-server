@@ -83,16 +83,20 @@ type OnlineHistoryRedisConsumerHandler struct {
 
 func NewOnlineHistoryRedisConsumerHandler(kafkaConf *config.Kafka, database controller.CommonMsgDatabase,
 	conversationRpcClient *rpcclient.ConversationRpcClient, groupRpcClient *rpcclient.GroupRpcClient) (*OnlineHistoryRedisConsumerHandler, error) {
+	// ToRedisTopic topic消费端 接收msg模块的消息
 	historyConsumerGroup, err := kafka.NewMConsumerGroup(kafkaConf.Build(), kafkaConf.ToRedisGroupID, []string{kafkaConf.ToRedisTopic})
 	if err != nil {
 		return nil, err
 	}
 	var och OnlineHistoryRedisConsumerHandler
 	och.msgDatabase = database
+	// 定义通道接收消息
 	och.msgDistributionCh = make(chan Cmd2Value) // no buffer channel
+	// 处理msgDistributionCh通道消息
 	go och.MessagesDistributionHandle()
 	for i := 0; i < ChannelNum; i++ {
 		och.chArrays[i] = make(chan Cmd2Value, 50)
+		// 并发处理通道chArrays[i]中的有序消息
 		go och.Run(i)
 	}
 	och.conversationRpcClient = conversationRpcClient
@@ -102,6 +106,7 @@ func NewOnlineHistoryRedisConsumerHandler(kafkaConf *config.Kafka, database cont
 }
 
 func (och *OnlineHistoryRedisConsumerHandler) Run(channelID int) {
+	// 处理通道有序消息， 消息导通容量50， 每个消息单元中消息数组数<=1000条
 	for cmd := range och.chArrays[channelID] {
 		switch cmd.Cmd {
 		case SourceMessages:
@@ -118,6 +123,7 @@ func (och *OnlineHistoryRedisConsumerHandler) Run(channelID int) {
 				"uniqueKey",
 				msgChannelValue.uniqueKey,
 			)
+			// 对发送的消息进行分类
 			storageMsgList, notStorageMsgList, storageNotificationList, notStorageNotificationList, modifyMsgList := och.getPushStorageMsgList(
 				ctxMsgList,
 			)
@@ -135,7 +141,9 @@ func (och *OnlineHistoryRedisConsumerHandler) Run(channelID int) {
 				"modifyMsgList",
 				len(modifyMsgList),
 			)
+			// 按照规则生成conversation_id -- 直接使用ctxMsgList[0].message(因为发送消息用的key和分类的key都是固定规则生成的，所以在这个消息组中的消息一定属于同一个conversation)
 			conversationIDMsg := msgprocessor.GetChatConversationIDByMsg(ctxMsgList[0].message)
+			// 按照规则生成conversation_notify_id
 			conversationIDNotification := msgprocessor.GetNotificationConversationIDByMsg(ctxMsgList[0].message)
 			och.handleMsg(ctx, msgChannelValue.uniqueKey, conversationIDMsg, storageMsgList, notStorageMsgList)
 			och.handleNotification(
@@ -158,6 +166,7 @@ func (och *OnlineHistoryRedisConsumerHandler) getPushStorageMsgList(
 ) (storageMsgList, notStorageMsgList, storageNotificatoinList, notStorageNotificationList, modifyMsgList []*sdkws.MsgData) {
 	isStorage := func(msg *sdkws.MsgData) bool {
 		options2 := msgprocessor.Options(msg.Options)
+		// 消息中是否包含history option
 		if options2.IsHistory() {
 			return true
 		}
@@ -166,6 +175,7 @@ func (och *OnlineHistoryRedisConsumerHandler) getPushStorageMsgList(
 		// }
 		return false
 	}
+	// 遍历有序消息，根据消息的option进行分类成不同的消息集合
 	for _, v := range totalMsgs {
 		options := msgprocessor.Options(v.message.Options)
 		if !options.IsNotNotification() {
@@ -248,13 +258,16 @@ func (och *OnlineHistoryRedisConsumerHandler) toPushTopic(ctx context.Context, k
 }
 
 func (och *OnlineHistoryRedisConsumerHandler) handleMsg(ctx context.Context, key, conversationID string, storageList, notStorageList []*sdkws.MsgData) {
+	// 发送不需要保存的消息组到kafka topic(ToPushTopic) 到push 模块 -- 单条发送
 	och.toPushTopic(ctx, key, conversationID, notStorageList)
 	if len(storageList) > 0 {
+		// 处理需要存储的消息列表：存储消息 / 保存当前conversation max seq / 保存当前conversation发送者已读seq
 		lastSeq, isNewConversation, err := och.msgDatabase.BatchInsertChat2Cache(ctx, conversationID, storageList)
 		if err != nil && errs.Unwrap(err) != redis.Nil {
 			log.ZError(ctx, "batch data insert to redis err", err, "storageMsgList", storageList)
 			return
 		}
+		// 首次建立conversation
 		if isNewConversation {
 			switch storageList[0].SessionType {
 			case constant.ReadGroupChatType:
@@ -272,6 +285,7 @@ func (och *OnlineHistoryRedisConsumerHandler) handleMsg(ctx context.Context, key
 					}
 				}
 			case constant.SingleChatType, constant.NotificationChatType:
+				// msg-transfer模块通过rpc调用conversation模块创建conversation信息
 				if err := och.conversationRpcClient.SingleChatFirstCreateConversation(ctx, storageList[0].RecvID,
 					storageList[0].SendID, conversationID, storageList[0].SessionType); err != nil {
 					log.ZWarn(ctx, "single chat or notification first create conversation error", err,
@@ -284,10 +298,12 @@ func (och *OnlineHistoryRedisConsumerHandler) handleMsg(ctx context.Context, key
 		}
 
 		log.ZDebug(ctx, "success incr to next topic")
+		// 发送需要保存的消息组到kafka(topic: ToMongoTopic), 然后又被当前模块的online_msg_to_mongo消费
 		err = och.msgDatabase.MsgToMongoMQ(ctx, key, conversationID, storageList, lastSeq)
 		if err != nil {
 			log.ZError(ctx, "MsgToMongoMQ error", err)
 		}
+		// 发送需要保存的消息组到kafka topic(ToPushTopic) 到 push模块 -- 单条发送
 		och.toPushTopic(ctx, key, conversationID, storageList)
 	}
 }
@@ -296,14 +312,17 @@ func (och *OnlineHistoryRedisConsumerHandler) MessagesDistributionHandle() {
 	for {
 		aggregationMsgs := make(map[string][]*ContextMsg, ChannelNum)
 		select {
+		// 从通道中读取0.1s时间分片处理的消息分组，每组消息条数<=1000
 		case cmd := <-och.msgDistributionCh:
 			switch cmd.Cmd {
 			case ConsumerMsgs:
 				triggerChannelValue := cmd.Value.(TriggerChannelValue)
 				ctx := triggerChannelValue.ctx
+				// 分片消息数组<=1000
 				consumerMessages := triggerChannelValue.cMsgList
 				// Aggregation map[userid]message list
 				log.ZDebug(ctx, "batch messages come to distribution center", "length", len(consumerMessages))
+				// 遍历并解析每组分片的1000条消息
 				for i := 0; i < len(consumerMessages); i++ {
 					ctxMsg := &ContextMsg{}
 					msgFromMQ := &sdkws.MsgData{}
@@ -318,6 +337,7 @@ func (och *OnlineHistoryRedisConsumerHandler) MessagesDistributionHandle() {
 					}
 					log.ZInfo(ctx, "consumer.kafka.GetContextWithMQHeader", "len", len(consumerMessages[i].Headers),
 						"header", strings.Join(arr, ", "))
+					// kafka消息头和消息重新构造消息
 					ctxMsg.ctx = kafka.GetContextWithMQHeader(consumerMessages[i].Headers)
 					ctxMsg.message = msgFromMQ
 					log.ZDebug(
@@ -330,6 +350,7 @@ func (och *OnlineHistoryRedisConsumerHandler) MessagesDistributionHandle() {
 					)
 					// aggregationMsgs[string(consumerMessages[i].Key)] =
 					// append(aggregationMsgs[string(consumerMessages[i].Key)], ctxMsg)
+					// 用发送的消息的key对1000条消息进行分类map[string][]...
 					if oldM, ok := aggregationMsgs[string(consumerMessages[i].Key)]; ok {
 						oldM = append(oldM, ctxMsg)
 						aggregationMsgs[string(consumerMessages[i].Key)] = oldM
@@ -340,6 +361,7 @@ func (och *OnlineHistoryRedisConsumerHandler) MessagesDistributionHandle() {
 					}
 				}
 				log.ZDebug(ctx, "generate map list users len", "length", len(aggregationMsgs))
+				// 对分类消息进行处理
 				for uniqueKey, v := range aggregationMsgs {
 					if len(v) >= 0 {
 						hashCode := stringutil.GetHashCode(uniqueKey)
@@ -355,6 +377,7 @@ func (och *OnlineHistoryRedisConsumerHandler) MessagesDistributionHandle() {
 							"uniqueKey",
 							uniqueKey,
 						)
+						// 将key对应的分类消息组写入channel id对应的channel中，那么相同key的消息会按照发送顺序进入通道，保证消息有序。（到这里都保证了从发送端过kafka，再从kafka读取到写入channel_id对应的通道都是有序的）
 						och.chArrays[channelID] <- Cmd2Value{Cmd: SourceMessages, Value: MsgChannelValue{uniqueKey: uniqueKey, ctxMsgList: v, ctx: newCtx}}
 					}
 				}
@@ -382,6 +405,7 @@ func (och *OnlineHistoryRedisConsumerHandler) Cleanup(_ sarama.ConsumerGroupSess
 	return nil
 }
 
+// ConsumeClaim 消费msg模块发送的ToRedisTopic消息：两个goroutine，一个从kafka读消息负责写入到数组中，另一个在0.1s时从数组中取走消息
 func (och *OnlineHistoryRedisConsumerHandler) ConsumeClaim(
 	sess sarama.ConsumerGroupSession,
 	claim sarama.ConsumerGroupClaim,
@@ -401,7 +425,8 @@ func (och *OnlineHistoryRedisConsumerHandler) ConsumeClaim(
 		split    = 1000
 		rwLock   = new(sync.RWMutex)
 		messages = make([]*sarama.ConsumerMessage, 0, 1000)
-		ticker   = time.NewTicker(time.Millisecond * 100)
+		// 0.1s批量处理一次消息
+		ticker = time.NewTicker(time.Millisecond * 100)
 
 		wg      = sync.WaitGroup{}
 		running = new(atomic.Bool)
@@ -414,6 +439,7 @@ func (och *OnlineHistoryRedisConsumerHandler) ConsumeClaim(
 
 		for {
 			select {
+			// 0.1s时间开始处理
 			case <-ticker.C:
 				// if the buffer is empty and running is false, return loop.
 				if len(messages) == 0 {
@@ -424,7 +450,9 @@ func (och *OnlineHistoryRedisConsumerHandler) ConsumeClaim(
 					continue
 				}
 
+				// 获取lock
 				rwLock.Lock()
+				// 读取数组消息，复用数组
 				buffer := make([]*sarama.ConsumerMessage, 0, len(messages))
 				buffer = append(buffer, messages...)
 
@@ -435,11 +463,13 @@ func (och *OnlineHistoryRedisConsumerHandler) ConsumeClaim(
 				start := time.Now()
 				ctx := mcontext.WithTriggerIDContext(context.Background(), idutil.OperationIDGenerator())
 				log.ZDebug(ctx, "timer trigger msg consumer start", "length", len(buffer))
+				// 将数组中的消息进行分片(每组消息1000条)，并写入msgDistributionCh通道中
 				for i := 0; i < len(buffer)/split; i++ {
 					och.msgDistributionCh <- Cmd2Value{Cmd: ConsumerMsgs, Value: TriggerChannelValue{
 						ctx: ctx, cMsgList: buffer[i*split : (i+1)*split],
 					}}
 				}
+				// 剩余消息写入到msgDistributionCh通道中
 				if (len(buffer) % split) > 0 {
 					och.msgDistributionCh <- Cmd2Value{Cmd: ConsumerMsgs, Value: TriggerChannelValue{
 						ctx: ctx, cMsgList: buffer[split*(len(buffer)/split):],
@@ -469,10 +499,13 @@ func (och *OnlineHistoryRedisConsumerHandler) ConsumeClaim(
 					continue
 				}
 
+				// lock保护
 				rwLock.Lock()
+				// 读取kafka消息写入到数组中
 				messages = append(messages, msg)
 				rwLock.Unlock()
 
+				// 标记自动提交
 				sess.MarkMessage(msg, "")
 
 			case <-sess.Context().Done():

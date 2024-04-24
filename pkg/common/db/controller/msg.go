@@ -358,12 +358,14 @@ func (db *commonMsgDatabase) DelUserDeleteMsgsList(ctx context.Context, conversa
 }
 
 func (db *commonMsgDatabase) BatchInsertChat2Cache(ctx context.Context, conversationID string, msgs []*sdkws.MsgData) (seq int64, isNew bool, err error) {
+	// 获取当前conversation在redis中的max seq
 	currentMaxSeq, err := db.seq.GetMaxSeq(ctx, conversationID)
 	if err != nil && errs.Unwrap(err) != redis.Nil {
 		log.ZError(ctx, "db.seq.GetMaxSeq", err)
 		return 0, false, err
 	}
 	lenList := len(msgs)
+	// 保存最新的100条
 	if int64(lenList) > db.msgTable.GetSingleGocMsgNum() {
 		return 0, false, errs.New("message count exceeds limit", "limit", db.msgTable.GetSingleGocMsgNum()).Wrap()
 	}
@@ -378,9 +380,11 @@ func (db *commonMsgDatabase) BatchInsertChat2Cache(ctx context.Context, conversa
 	for _, m := range msgs {
 		currentMaxSeq++
 		m.Seq = currentMaxSeq
+		// 计算当前conversation消息组中发送者对应的seq
 		userSeqMap[m.SendID] = m.Seq
 	}
 
+	// 把消息打包成string存储到redis中
 	failedNum, err := db.msg.SetMessageToCache(ctx, conversationID, msgs)
 	if err != nil {
 		prommetrics.MsgInsertRedisFailedCounter.Add(float64(failedNum))
@@ -389,12 +393,14 @@ func (db *commonMsgDatabase) BatchInsertChat2Cache(ctx context.Context, conversa
 		prommetrics.MsgInsertRedisSuccessCounter.Inc()
 	}
 
+	// 保存当前conversation对应max seq到redis
 	err = db.seq.SetMaxSeq(ctx, conversationID, currentMaxSeq)
 	if err != nil {
 		log.ZError(ctx, "db.seq.SetMaxSeq error", err, "conversationID", conversationID)
 		prommetrics.SeqSetFailedCounter.Inc()
 	}
 
+	// 设置发送者已读seq到redis(因为是发送者，所以直接就是已读)
 	err = db.seq.SetHasReadSeqs(ctx, conversationID, userSeqMap)
 	if err != nil {
 		log.ZError(ctx, "SetHasReadSeqs error", err, "userSeqMap", userSeqMap, "conversationID", conversationID)

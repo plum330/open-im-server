@@ -45,6 +45,7 @@ func NewOnlineHistoryMongoConsumerHandler(kafkaConf *config.Kafka, database cont
 	return mc, nil
 }
 
+// 处理ToMongoTopic发送的消息组到mongo保存
 func (mc *OnlineHistoryMongoConsumerHandler) handleChatWs2Mongo(ctx context.Context, cMsg *sarama.ConsumerMessage, key string, session sarama.ConsumerGroupSession) {
 	msg := cMsg.Value
 	msgFromMQ := pbmsg.MsgDataToMongoByMQ{}
@@ -58,6 +59,7 @@ func (mc *OnlineHistoryMongoConsumerHandler) handleChatWs2Mongo(ctx context.Cont
 		return
 	}
 	log.ZInfo(ctx, "mongo consumer recv msg", "msgs", msgFromMQ.String())
+	// 消息批量入库（考虑写扩散-收件模式 2.0）
 	err = mc.msgDatabase.BatchInsertChat2DB(ctx, msgFromMQ.ConversationID, msgFromMQ.MsgData, msgFromMQ.LastSeq)
 	if err != nil {
 		log.ZError(
@@ -77,6 +79,7 @@ func (mc *OnlineHistoryMongoConsumerHandler) handleChatWs2Mongo(ctx context.Cont
 	for _, msg := range msgFromMQ.MsgData {
 		seqs = append(seqs, msg.Seq)
 	}
+	// 入库成功后，删除之前保存在redis中conversation对应的100条消息
 	err = mc.msgDatabase.DeleteMessagesFromCache(ctx, msgFromMQ.ConversationID, seqs)
 	if err != nil {
 		log.ZError(
@@ -94,6 +97,8 @@ func (mc *OnlineHistoryMongoConsumerHandler) handleChatWs2Mongo(ctx context.Cont
 
 func (OnlineHistoryMongoConsumerHandler) Setup(_ sarama.ConsumerGroupSession) error   { return nil }
 func (OnlineHistoryMongoConsumerHandler) Cleanup(_ sarama.ConsumerGroupSession) error { return nil }
+
+// 消费kafka topic:ToMongoTopic发送的消息组
 
 func (mc *OnlineHistoryMongoConsumerHandler) ConsumeClaim(
 	sess sarama.ConsumerGroupSession,

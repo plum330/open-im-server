@@ -150,10 +150,12 @@ func (c *conversationDatabase) CreateConversation(ctx context.Context, conversat
 	var userIDs []string
 	cache := c.cache.NewCache()
 	for _, conversation := range conversations {
+		// 获取conversation cache key
 		cache = cache.DelConversations(conversation.OwnerUserID, conversation.ConversationID)
 		cache = cache.DelConversationNotReceiveMessageUserIDs(conversation.ConversationID)
 		userIDs = append(userIDs, conversation.OwnerUserID)
 	}
+	// 执行删除
 	return cache.DelConversationIDs(userIDs...).DelUserConversationIDsHash(userIDs...).ExecDel(ctx)
 }
 

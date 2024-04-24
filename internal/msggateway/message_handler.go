@@ -137,16 +137,19 @@ func (g GrpcHandler) GetSeq(ctx context.Context, data *Req) ([]byte, error) {
 // SendMessage handles the sending of messages through gRPC. It unmarshals the request data,
 // validates the message, and then sends it using the message RPC client.
 func (g GrpcHandler) SendMessage(ctx context.Context, data *Req) ([]byte, error) {
+	// 解析ws消息到msg data
 	var msgData sdkws.MsgData
 	if err := proto.Unmarshal(data.Data, &msgData); err != nil {
 		return nil, errs.WrapMsg(err, "SendMessage: error unmarshaling message data", "action", "unmarshal", "dataType", "MsgData")
 	}
 
+	// 消息校验
 	if err := g.validate.Struct(&msgData); err != nil {
 		return nil, errs.WrapMsg(err, "SendMessage: message data validation failed", "action", "validate", "dataType", "MsgData")
 	}
 
 	req := msg.SendMsgReq{MsgData: &msgData}
+	// msg-gate调用rcp发送消息到msg server
 	resp, err := g.msgRpcClient.SendMsg(ctx, &req)
 	if err != nil {
 		return nil, err

@@ -32,6 +32,8 @@ import (
 	"github.com/openimsdk/tools/utils/stringutil"
 )
 
+// 接收msg-gate的消息调用
+
 func (m *msgServer) SendMsg(ctx context.Context, req *pbmsg.SendMsgReq) (*pbmsg.SendMsgResp, error) {
 	if req.MsgData != nil {
 		m.encapsulateMsgData(req.MsgData)
@@ -137,6 +139,7 @@ func (m *msgServer) sendMsgSingleChat(ctx context.Context, req *pbmsg.SendMsgReq
 	isSend := true
 	isNotification := msgprocessor.IsNotificationByMsg(req.MsgData)
 	if !isNotification {
+		// 判断是否发送
 		isSend, err = m.modifyMessageByUserMessageReceiveOpt(
 			ctx,
 			req.MsgData.RecvID,
@@ -152,6 +155,7 @@ func (m *msgServer) sendMsgSingleChat(ctx context.Context, req *pbmsg.SendMsgReq
 		prommetrics.SingleChatMsgProcessFailedCounter.Inc()
 		return nil, nil
 	} else {
+		// 消息需要发送
 		if err = m.webhookBeforeSendSingleMsg(ctx, &m.config.WebhooksConfig.BeforeSendSingleMsg, req); err != nil {
 			return nil, err
 		}
@@ -159,6 +163,7 @@ func (m *msgServer) sendMsgSingleChat(ctx context.Context, req *pbmsg.SendMsgReq
 			return nil, err
 		}
 
+		// msg模块通过kafka发送消息到 msg-transfer (topic: ToRedisTopic)， GenConversationUniqueKeyForSingle构造消息发送的key:send_id 和 receive_id
 		if err := m.MsgDatabase.MsgToMQ(ctx, conversationutil.GenConversationUniqueKeyForSingle(req.MsgData.SendID, req.MsgData.RecvID), req.MsgData); err != nil {
 			prommetrics.SingleChatMsgProcessFailedCounter.Inc()
 			return nil, err

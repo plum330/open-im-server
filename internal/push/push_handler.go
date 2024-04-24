@@ -77,6 +77,7 @@ func NewConsumerHandler(config *Config, offlinePusher offlinepush.OfflinePusher,
 	return &consumerHandler, nil
 }
 
+// 处理来自msg-transfer模块 kafka topic（ToPushTopic）的消息
 func (c *ConsumerHandler) handleMs2PsChat(ctx context.Context, msg []byte) {
 	msgFromMQ := pbchat.PushMsgDataToMQ{}
 	if err := proto.Unmarshal(msg, &msgFromMQ); err != nil {
@@ -90,6 +91,7 @@ func (c *ConsumerHandler) handleMs2PsChat(ctx context.Context, msg []byte) {
 	sec := msgFromMQ.MsgData.SendTime / 1000
 	nowSec := timeutil.GetCurrentTimestampBySecond()
 	log.ZDebug(ctx, "push msg", "msg", pbData.String(), "sec", sec, "nowSec", nowSec)
+	// 发送时间和当前时间差大于10s则不发送
 	if nowSec-sec > 10 {
 		return
 	}
@@ -105,6 +107,7 @@ func (c *ConsumerHandler) handleMs2PsChat(ctx context.Context, msg []byte) {
 		} else {
 			pushUserIDList = append(pushUserIDList, pbData.MsgData.RecvID, pbData.MsgData.SendID)
 		}
+		// 将一条消息push到users
 		err = c.Push2User(ctx, pushUserIDList, pbData.MsgData)
 	}
 	if err != nil {
@@ -116,6 +119,7 @@ func (*ConsumerHandler) Setup(sarama.ConsumerGroupSession) error { return nil }
 
 func (*ConsumerHandler) Cleanup(sarama.ConsumerGroupSession) error { return nil }
 
+// ConsumeClaim 消费来自 msg-transfer模块 kafka topic(ToPushTopic)的消息
 func (c *ConsumerHandler) ConsumeClaim(sess sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
 	for msg := range claim.Messages() {
 		ctx := c.pushConsumerGroup.GetContextFromMsg(msg)
@@ -131,6 +135,7 @@ func (c *ConsumerHandler) Push2User(ctx context.Context, userIDs []string, msg *
 	if err := c.webhookBeforeOnlinePush(ctx, &c.config.WebhooksConfig.BeforeOnlinePush, userIDs, msg); err != nil {
 		return err
 	}
+	// 获取在线user连接并推送这条消息
 	wsResults, err := c.onlinePusher.GetConnsAndOnlinePush(ctx, msg, userIDs)
 	if err != nil {
 		return err
@@ -142,6 +147,7 @@ func (c *ConsumerHandler) Push2User(ctx context.Context, userIDs []string, msg *
 		return nil
 	}
 
+	// 根据推送结果决定是否进行离线推送
 	for _, v := range wsResults {
 		//message sender do not need offline push
 		if msg.SendID == v.UserID {
