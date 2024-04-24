@@ -31,12 +31,15 @@ import (
 )
 
 type Req struct {
+	// 请求类型：发送消息 / 获取seq
 	ReqIdentifier int32  `json:"reqIdentifier" validate:"required"`
 	Token         string `json:"token"`
 	SendID        string `json:"sendID"        validate:"required"`
-	OperationID   string `json:"operationID"   validate:"required"`
-	MsgIncr       string `json:"msgIncr"       validate:"required"`
-	Data          []byte `json:"data"`
+	// 类似trace id？
+	OperationID string `json:"operationID"   validate:"required"`
+	MsgIncr     string `json:"msgIncr"       validate:"required"`
+	// 消息体，不同ReqIdentifier对应的消息体不一样
+	Data []byte `json:"data"`
 }
 
 func (r *Req) String() string {
@@ -123,6 +126,7 @@ func (g GrpcHandler) GetSeq(ctx context.Context, data *Req) ([]byte, error) {
 	if err := g.validate.Struct(&req); err != nil {
 		return nil, errs.WrapMsg(err, "GetSeq: validation failed", "action", "validate", "dataType", "GetMaxSeqReq")
 	}
+	// rpc调用msg模块获取该user id对应的所有conversation的max/min seq，用于同步数据
 	resp, err := g.msgRpcClient.GetMaxSeq(ctx, &req)
 	if err != nil {
 		return nil, err

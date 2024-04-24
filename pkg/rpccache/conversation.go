@@ -62,6 +62,7 @@ func (c *ConversationLocalCache) GetConversationIDs(ctx context.Context, ownerUs
 	}()
 	return localcache.AnyValue[[]string](c.local.Get(ctx, cachekey.GetConversationIDsKey(ownerUserID), func(ctx context.Context) (any, error) {
 		log.ZDebug(ctx, "ConversationLocalCache GetConversationIDs rpc", "ownerUserID", ownerUserID)
+		// rpc调用conversation模块获取当前user id对应的conversation ids
 		return c.client.GetConversationIDs(ctx, ownerUserID)
 	}))
 }

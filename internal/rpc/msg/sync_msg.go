@@ -90,6 +90,7 @@ func (m *msgServer) GetMaxSeq(ctx context.Context, req *sdkws.GetMaxSeqReq) (*sd
 	if err := authverify.CheckAccessV3(ctx, req.UserID, m.config.Share.IMAdminUserID); err != nil {
 		return nil, err
 	}
+	// 从conversation cache中获取当前user id对应的所有conversation ids
 	conversationIDs, err := m.ConversationLocalCache.GetConversationIDs(ctx, req.UserID)
 	if err != nil {
 		return nil, err
