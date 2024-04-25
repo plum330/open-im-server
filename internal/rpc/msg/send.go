@@ -34,6 +34,22 @@ import (
 
 // 接收msg-gate的消息调用
 
+/*
+	https://cloud.baidu.com/article/293728
+	在v2.3.3版本中，群发采用的是写扩散方案：
+	对于群发，获取群用户列表后，sendMsgToGroupOptimization 将群发消息1->N条后进行单条转发(通过对群成员分组并发执行-20个user一组启动一个goroutine)
+	消息发送到msg-transfer后，采用收件箱的方案存储消息到mongo document，document结构如下：
+	type UserChat struct {
+		UID string
+		Msg []MsgInfo
+	}
+	type MsgInfo struct {
+		SendTime int64
+		Msg      []byte // 一条消息内容
+	}
+	从getSeqUid该函数可知，一个会话的收件箱大小是5000条msg（即一个会话只存储5000条消息），每条消息通过seq和会话id计算得到seqUid作为document的uid更新对应msg数组
+*/
+
 func (m *msgServer) SendMsg(ctx context.Context, req *pbmsg.SendMsgReq) (*pbmsg.SendMsgResp, error) {
 	if req.MsgData != nil {
 		m.encapsulateMsgData(req.MsgData)
