@@ -97,10 +97,11 @@ func NewConversationRedis(rdb redis.UniversalClient, localCache *config.LocalCac
 		rcClient:       rcClient,
 		metaCache:      mc,
 		conversationDB: db,
-		expireTime:     conversationExpireTime,
+		expireTime:     conversationExpireTime, // redis conversation缓存12小时
 	}
 }
 
+// 会话redis缓存使用rockscache保证数据一致性
 type ConversationRedisCache struct {
 	metaCache
 	rcClient       *rockscache.Client
@@ -170,6 +171,7 @@ func (c *ConversationRedisCache) getUserConversationIDsHashKey(ownerUserID strin
 	return cachekey.GetUserConversationIDsHashKey(ownerUserID)
 }
 
+// rockscache获取用户所有的会话ids
 func (c *ConversationRedisCache) GetUserConversationIDs(ctx context.Context, ownerUserID string) ([]string, error) {
 	// 首先从redis中查找，没找到再从db中查询， 用的是rockscache
 	return getCache(ctx, c.rcClient, c.getConversationIDsKey(ownerUserID), c.expireTime, func(ctx context.Context) ([]string, error) {
@@ -190,6 +192,7 @@ func (c *ConversationRedisCache) DelConversationIDs(userIDs ...string) Conversat
 	return cache
 }
 
+// rockscache获取用户所有的会话ids，并拼接计算hash值返回保存
 func (c *ConversationRedisCache) GetUserConversationIDsHash(ctx context.Context, ownerUserID string) (hash uint64, err error) {
 	// 先从redis查找，再从db查找，并写入redis
 	return getCache(
@@ -221,6 +224,7 @@ func (c *ConversationRedisCache) DelUserConversationIDsHash(ownerUserIDs ...stri
 	return cache
 }
 
+// rockscache查询用户指定会话信息
 func (c *ConversationRedisCache) GetConversation(ctx context.Context, ownerUserID, conversationID string) (*relationtb.ConversationModel, error) {
 	// 从redis中获取用户的当前会话内容
 	return getCache(ctx, c.rcClient, c.getConversationKey(ownerUserID, conversationID), c.expireTime, func(ctx context.Context) (*relationtb.ConversationModel, error) {
@@ -250,7 +254,7 @@ func (c *ConversationRedisCache) DelConversations(ownerUserID string, conversati
 //		return 0, errs.New("not found key:" + key + " in keys")
 //	}
 //
-// 获取用户多个会话的内容
+// rockscache循环获取用户多个会话的内容
 func (c *ConversationRedisCache) GetConversations(ctx context.Context, ownerUserID string, conversationIDs []string) ([]*relationtb.ConversationModel, error) {
 	// var keys []string
 	// for _, conversarionID := range conversationIDs {
@@ -273,6 +277,7 @@ func (c *ConversationRedisCache) GetConversations(ctx context.Context, ownerUser
 	})
 }
 
+// rockscache获取用户所有会话消息
 func (c *ConversationRedisCache) GetUserAllConversations(ctx context.Context, ownerUserID string) ([]*relationtb.ConversationModel, error) {
 	conversationIDs, err := c.GetUserConversationIDs(ctx, ownerUserID)
 	if err != nil {
@@ -295,7 +300,7 @@ func (c *ConversationRedisCache) GetUserAllConversations(ctx context.Context, ow
 	return c.GetConversations(ctx, ownerUserID, conversationIDs)
 }
 
-// GetUserRecvMsgOpt 获取用户当前会话设置的消息接收选项设置
+// rockscache获取用户当前会话设置的消息接收选项设置
 func (c *ConversationRedisCache) GetUserRecvMsgOpt(ctx context.Context, ownerUserID, conversationID string) (opt int, err error) {
 	return getCache(ctx, c.rcClient, c.getRecvMsgOptKey(ownerUserID, conversationID), c.expireTime, func(ctx context.Context) (opt int, err error) {
 		return c.conversationDB.GetUserRecvMsgOpt(ctx, ownerUserID, conversationID)
@@ -371,6 +376,7 @@ func (c *ConversationRedisCache) DelConversationByConversationID(conversationIDs
 	panic("implement me")
 }
 
+// rockscache获取当前会话不接收消息的用户ids
 func (c *ConversationRedisCache) GetConversationNotReceiveMessageUserIDs(ctx context.Context, conversationID string) ([]string, error) {
 	return getCache(ctx, c.rcClient, c.getConversationNotReceiveMessageUserIDsKey(conversationID), c.expireTime, func(ctx context.Context) ([]string, error) {
 		return c.conversationDB.GetConversationNotReceiveMessageUserIDs(ctx, conversationID)

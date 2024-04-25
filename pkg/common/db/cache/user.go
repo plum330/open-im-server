@@ -40,6 +40,7 @@ const (
 	statusMod                 = 501
 )
 
+// 用户缓存管理使用了redis hash， 和 rockscache保证数据一致性（底层使用的也是hash）
 type UserCache interface {
 	metaCache
 	NewCache() UserCache
@@ -87,20 +88,24 @@ func (u *UserCacheRedis) NewCache() UserCache {
 	}
 }
 
+// 用户信息key
 func (u *UserCacheRedis) getUserInfoKey(userID string) string {
 	return cachekey.GetUserInfoKey(userID)
 }
 
+// 用户消息接收选项(全局消息)key
 func (u *UserCacheRedis) getUserGlobalRecvMsgOptKey(userID string) string {
 	return cachekey.GetUserGlobalRecvMsgOptKey(userID)
 }
 
+// 获取用户信息， rockscache
 func (u *UserCacheRedis) GetUserInfo(ctx context.Context, userID string) (userInfo *relationtb.UserModel, err error) {
 	return getCache(ctx, u.rcClient, u.getUserInfoKey(userID), u.expireTime, func(ctx context.Context) (*relationtb.UserModel, error) {
 		return u.userDB.Take(ctx, userID)
 	})
 }
 
+// 获取多个用户信息， 多次执行rockscache
 func (u *UserCacheRedis) GetUsersInfo(ctx context.Context, userIDs []string) ([]*relationtb.UserModel, error) {
 	return batchGetCache2(ctx, u.rcClient, u.expireTime, userIDs, func(userID string) string {
 		return u.getUserInfoKey(userID)
@@ -120,6 +125,7 @@ func (u *UserCacheRedis) DelUsersInfo(userIDs ...string) UserCache {
 	return cache
 }
 
+// 获取用户消息接收选项（全局）, rockscache
 func (u *UserCacheRedis) GetUserGlobalRecvMsgOpt(ctx context.Context, userID string) (opt int, err error) {
 	return getCache(
 		ctx,
@@ -143,6 +149,7 @@ func (u *UserCacheRedis) DelUsersGlobalRecvMsgOpt(userIDs ...string) UserCache {
 	return cache
 }
 
+// 查询用户在线状态, redis hash
 // GetUserStatus get user status.
 func (u *UserCacheRedis) GetUserStatus(ctx context.Context, userIDs []string) ([]*user.OnlineStatus, error) {
 	userStatus := make([]*user.OnlineStatus, 0, len(userIDs))
@@ -178,9 +185,11 @@ func (u *UserCacheRedis) GetUserStatus(ctx context.Context, userIDs []string) ([
 	return userStatus, nil
 }
 
+// 保存用户在线状态 （多个用户一个hash）
 // SetUserStatus Set the user status and save it in redis.
 func (u *UserCacheRedis) SetUserStatus(ctx context.Context, userID string, status, platformID int32) error {
 	UserIDNum := crc32.ChecksumIEEE([]byte(userID))
+	// 经过计算设置多个用户的在线状态在一个redis hash， field用user id区分
 	modKey := strconv.Itoa(int(UserIDNum % statusMod))
 	key := olineStatusKey + modKey
 	log.ZDebug(ctx, "SetUserStatus args", "userID", userID, "status", status, "platformID", platformID, "modKey", modKey, "key", key)
@@ -188,7 +197,9 @@ func (u *UserCacheRedis) SetUserStatus(ctx context.Context, userID string, statu
 	if err != nil {
 		return errs.Wrap(err)
 	}
+	// 在线状态key不存在
 	if isNewKey == 0 {
+		// 设置用户在线 redis hash
 		if status == constant.Online {
 			onlineStatus := user.OnlineStatus{
 				UserID:      userID,
@@ -203,6 +214,7 @@ func (u *UserCacheRedis) SetUserStatus(ctx context.Context, userID string, statu
 			if err != nil {
 				return errs.Wrap(err)
 			}
+			// 过期时间24小时
 			u.rdb.Expire(ctx, key, userOlineStatusExpireTime)
 
 			return nil
@@ -210,6 +222,7 @@ func (u *UserCacheRedis) SetUserStatus(ctx context.Context, userID string, statu
 	}
 
 	isNil := false
+	// 获取当前用户在线状态是否存在
 	result, err := u.rdb.HGet(ctx, key, userID).Result()
 	if err != nil {
 		if errors.Is(err, redis.Nil) {
@@ -234,6 +247,7 @@ func (u *UserCacheRedis) SetUserStatus(ctx context.Context, userID string, statu
 	return nil
 }
 
+// 更新用户离线状态
 func (u *UserCacheRedis) refreshStatusOffline(ctx context.Context, userID string, status, platformID int32, isNil bool, err error, result, key string) error {
 	if isNil {
 		log.ZWarn(ctx, "this user not online,maybe trigger order not right",

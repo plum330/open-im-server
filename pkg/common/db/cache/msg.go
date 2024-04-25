@@ -59,6 +59,7 @@ var concurrentLimit = 3
 //	MsgCache
 //}
 
+// 消息redis缓存使用的数据结构： string / set
 type MsgCache interface {
 	GetMessagesBySeq(ctx context.Context, conversationID string, seqs []int64) (seqMsg []*sdkws.MsgData, failedSeqList []int64, err error)
 	SetMessageToCache(ctx context.Context, conversationID string, msgs []*sdkws.MsgData) (int, error)
@@ -88,21 +89,26 @@ func NewMsgCache(client redis.UniversalClient, redisEnablePipeline bool) MsgCach
 	return &msgCache{rdb: client, msgCacheTimeout: msgCacheTimeout, redisEnablePipeline: redisEnablePipeline}
 }
 
+// msg redis缓存
 type msgCache struct {
-	metaCache
+	metaCache           // 没用？
 	rdb                 redis.UniversalClient
 	msgCacheTimeout     time.Duration
 	redisEnablePipeline bool
 }
 
+// 一个会话redis key
 func (c *msgCache) allMessageCacheKey(conversationID string) string {
 	return messageCache + conversationID + "_*"
 }
 
+// 一个会话指定序列号的redis key
 func (c *msgCache) getMessageCacheKey(conversationID string, seq int64) string {
 	return messageCache + conversationID + "_" + strconv.Itoa(int(seq))
 }
 
+// 保存当前会话的消息组(redis string): 按照会话-序列号作为redis key保存对应的一条消息
+// 每条消息缓存时间24小时
 func (c *msgCache) SetMessageToCache(ctx context.Context, conversationID string, msgs []*sdkws.MsgData) (int, error) {
 	if c.redisEnablePipeline {
 		return c.PipeSetMessageToCache(ctx, conversationID, msgs)
@@ -172,9 +178,12 @@ func (c *msgCache) getUserDelList(conversationID, userID string) string {
 	return userDelMessagesList + conversationID + ":" + userID
 }
 
+// 删除用户当前会话指定的seq对应的msgs
 func (c *msgCache) UserDeleteMsgs(ctx context.Context, conversationID string, seqs []int64, userID string) error {
 	for _, seq := range seqs {
+		// 当前会话seq被哪些用户删除过对应的key -- set
 		delUserListKey := c.getMessageDelUserListKey(conversationID, seq)
+		// 当前会话一个用户删除过哪些seq对应的key -- set
 		userDelListKey := c.getUserDelList(conversationID, userID)
 		err := c.rdb.SAdd(ctx, delUserListKey, userID).Err()
 		if err != nil {
@@ -216,6 +225,7 @@ func (c *msgCache) UserDeleteMsgs(ctx context.Context, conversationID string, se
 	// return errs.Wrap(err)
 }
 
+// 从redis set中获取用户在当前会话中删除的seq
 func (c *msgCache) GetUserDelList(ctx context.Context, userID, conversationID string) (seqs []int64, err error) {
 	result, err := c.rdb.SMembers(ctx, c.getUserDelList(conversationID, userID)).Result()
 	if err != nil {
@@ -229,6 +239,7 @@ func (c *msgCache) GetUserDelList(ctx context.Context, userID, conversationID st
 	return seqs, nil
 }
 
+// 删除当前会话多个seqs对应的用户 & 这些用户set中对应的seq
 func (c *msgCache) DelUserDeleteMsgsList(ctx context.Context, conversationID string, seqs []int64) {
 	for _, seq := range seqs {
 		delUsers, err := c.rdb.SMembers(ctx, c.getMessageDelUserListKey(conversationID, seq)).Result()
@@ -291,6 +302,7 @@ func (c *msgCache) DelUserDeleteMsgsList(ctx context.Context, conversationID str
 	//}
 }
 
+// 删除会话中seqs对应的消息
 func (c *msgCache) DeleteMessages(ctx context.Context, conversationID string, seqs []int64) error {
 	if c.redisEnablePipeline {
 		return c.PipeDeleteMessages(ctx, conversationID, seqs)
@@ -337,6 +349,7 @@ func (c *msgCache) PipeDeleteMessages(ctx context.Context, conversationID string
 	return nil
 }
 
+// 删除会话所有消息
 func (c *msgCache) CleanUpOneConversationAllMsg(ctx context.Context, conversationID string) error {
 	vals, err := c.rdb.Keys(ctx, c.allMessageCacheKey(conversationID)).Result()
 	if errors.Is(err, redis.Nil) {
@@ -352,6 +365,8 @@ func (c *msgCache) CleanUpOneConversationAllMsg(ctx context.Context, conversatio
 	}
 	return nil
 }
+
+// 从缓存中删除用户指定序列号消息（标记删除）
 
 func (c *msgCache) DelMsgFromCache(ctx context.Context, userID string, seqs []int64) error {
 	for _, seq := range seqs {
@@ -382,6 +397,7 @@ func (c *msgCache) DelMsgFromCache(ctx context.Context, userID string, seqs []in
 	return nil
 }
 
+// 消息发送key， 保存消息发送状态 - 24h
 func (c *msgCache) SetSendMsgStatus(ctx context.Context, id string, status int32) error {
 	return errs.Wrap(c.rdb.Set(ctx, sendMsgFailedFlag+id, status, time.Hour*24).Err())
 }
@@ -451,6 +467,7 @@ func (c *msgCache) DeleteOneMessageKey(ctx context.Context, clientMsgID string, 
 	return errs.Wrap(c.rdb.HDel(ctx, c.getMessageReactionExPrefix(clientMsgID, sessionType), subKey).Err())
 }
 
+// 获取当前会话seqs对应的消息和会话中失败的seq
 func (c *msgCache) GetMessagesBySeq(ctx context.Context, conversationID string, seqs []int64) (seqMsgs []*sdkws.MsgData, failedSeqs []int64, err error) {
 	if c.redisEnablePipeline {
 		return c.PipeGetMessagesBySeq(ctx, conversationID, seqs)

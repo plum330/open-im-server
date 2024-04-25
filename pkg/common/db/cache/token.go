@@ -9,6 +9,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// token redis缓存使用了hash
 func NewTokenCacheModel(rdb redis.UniversalClient) TokenModel {
 	return &tokenCache{
 		rdb: rdb,
@@ -22,6 +23,7 @@ type TokenModel interface {
 	DeleteTokenByUidPid(ctx context.Context, userID string, platformID int, fields []string) error
 }
 
+// token缓存只依赖redis
 type tokenCache struct {
 	rdb redis.UniversalClient
 }

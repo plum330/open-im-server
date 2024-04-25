@@ -53,12 +53,12 @@ func NewMetaCacheRedis(rcClient *rockscache.Client, keys ...string) metaCache {
 }
 
 type metaCacheRedis struct {
-	topic         string
-	rcClient      *rockscache.Client
-	keys          []string
-	maxRetryTimes int
-	retryInterval time.Duration
-	redisClient   redis.UniversalClient
+	topic         string                // 用户redis订阅发布
+	rcClient      *rockscache.Client    // 维护redis db数字一致性
+	keys          []string              // redis key
+	maxRetryTimes int                   // 最大重试次数
+	retryInterval time.Duration         // 重试间隔
+	redisClient   redis.UniversalClient // 普通redis client
 }
 
 func (m *metaCacheRedis) Copy() metaCache {
@@ -87,11 +87,13 @@ func (m *metaCacheRedis) SetRawRedisClient(cli redis.UniversalClient) {
 
 func (m *metaCacheRedis) ExecDel(ctx context.Context, distinct ...bool) error {
 	if len(distinct) > 0 && distinct[0] {
+		// keys去重
 		m.keys = datautil.Distinct(m.keys)
 	}
 	if len(m.keys) > 0 {
 		log.ZDebug(ctx, "delete cache", "topic", m.topic, "keys", m.keys)
 		for _, key := range m.keys {
+			// 重试删除redis缓存
 			for i := 0; i < m.maxRetryTimes; i++ {
 				if err := m.rcClient.TagAsDeleted(key); err != nil {
 					log.ZError(ctx, "delete cache failed", err, "key", key)
@@ -101,6 +103,7 @@ func (m *metaCacheRedis) ExecDel(ctx context.Context, distinct ...bool) error {
 				break
 			}
 		}
+		// redis 订阅发布作用？
 		if pk := getPublishKey(m.topic, m.keys); len(pk) > 0 {
 			data, err := json.Marshal(pk)
 			if err != nil {
@@ -139,6 +142,7 @@ func GetDefaultOpt() rockscache.Options {
 	return opts
 }
 
+// rockscache先从redis缓存中查找，没找到再从db中查找，再写入redis
 func getCache[T any](ctx context.Context, rcClient *rockscache.Client, key string, expire time.Duration, fn func(ctx context.Context) (T, error)) (T, error) {
 	var t T
 	var write bool
@@ -174,43 +178,45 @@ func getCache[T any](ctx context.Context, rcClient *rockscache.Client, key strin
 }
 
 // func batchGetCache[T any](ctx context.Context, rcClient *rockscache.Client, keys []string, expire time.Duration, keyIndexFn func(t T, keys []string) (int, error), fn func(ctx context.Context) ([]T,
-// error)) ([]T, error) {
-//	batchMap, err := rcClient.FetchBatch2(ctx, keys, expire, func(idxs []int) (m map[int]string, err error) {
-//		values := make(map[int]string)
-//		tArrays, err := fn(ctx)
+//
+//	error)) ([]T, error) {
+//		batchMap, err := rcClient.FetchBatch2(ctx, keys, expire, func(idxs []int) (m map[int]string, err error) {
+//			values := make(map[int]string)
+//			tArrays, err := fn(ctx)
+//			if err != nil {
+//				return nil, err
+//			}
+//			for _, v := range tArrays {
+//				index, err := keyIndexFn(v, keys)
+//				if err != nil {
+//					continue
+//				}
+//				bs, err := json.Marshal(v)
+//				if err != nil {
+//					return nil, utils.Wrap(err, "marshal failed")
+//				}
+//				values[index] = string(bs)
+//			}
+//			return values, nil
+//		})
 //		if err != nil {
 //			return nil, err
 //		}
-//		for _, v := range tArrays {
-//			index, err := keyIndexFn(v, keys)
-//			if err != nil {
-//				continue
+//		var tArrays []T
+//		for _, v := range batchMap {
+//			if v != "" {
+//				var t T
+//				err = json.Unmarshal([]byte(v), &t)
+//				if err != nil {
+//					return nil, utils.Wrap(err, "unmarshal failed")
+//				}
+//				tArrays = append(tArrays, t)
 //			}
-//			bs, err := json.Marshal(v)
-//			if err != nil {
-//				return nil, utils.Wrap(err, "marshal failed")
-//			}
-//			values[index] = string(bs)
 //		}
-//		return values, nil
-//	})
-//	if err != nil {
-//		return nil, err
+//		return tArrays, nil
 //	}
-//	var tArrays []T
-//	for _, v := range batchMap {
-//		if v != "" {
-//			var t T
-//			err = json.Unmarshal([]byte(v), &t)
-//			if err != nil {
-//				return nil, utils.Wrap(err, "unmarshal failed")
-//			}
-//			tArrays = append(tArrays, t)
-//		}
-//	}
-//	return tArrays, nil
-//}
-
+//
+// rockscache获取多个key对应的数据，泛型
 func batchGetCache2[T any, K comparable](
 	ctx context.Context,
 	rcClient *rockscache.Client,

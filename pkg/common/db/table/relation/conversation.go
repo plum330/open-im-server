@@ -21,6 +21,7 @@ import (
 	"github.com/openimsdk/tools/db/pagination"
 )
 
+// 会话模型
 type ConversationModel struct {
 	OwnerUserID           string    `bson:"owner_user_id"`
 	ConversationID        string    `bson:"conversation_id"`

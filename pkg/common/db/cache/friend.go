@@ -49,6 +49,8 @@ type FriendCache interface {
 	DelFriends(ownerUserID string, friendUserIDs []string) FriendCache
 }
 
+// 好友redis缓存使用rockscache保证数据一致性
+
 // FriendCacheRedis is an implementation of the FriendCache interface using Redis.
 type FriendCacheRedis struct {
 	metaCache
@@ -84,6 +86,7 @@ func (f *FriendCacheRedis) NewCache() FriendCache {
 	}
 }
 
+// 获取用户好友 key
 // getFriendIDsKey returns the key for storing friend IDs in the cache.
 func (f *FriendCacheRedis) getFriendIDsKey(ownerUserID string) string {
 	return cachekey.GetFriendIDsKey(ownerUserID)
@@ -94,11 +97,13 @@ func (f *FriendCacheRedis) getTwoWayFriendsIDsKey(ownerUserID string) string {
 	return cachekey.GetTwoWayFriendsIDsKey(ownerUserID)
 }
 
+// 获取用户和指定好友key
 // getFriendKey returns the key for storing friend info in the cache.
 func (f *FriendCacheRedis) getFriendKey(ownerUserID, friendUserID string) string {
 	return cachekey.GetFriendKey(ownerUserID, friendUserID)
 }
 
+// rockscache获取用户所有好友ids
 // GetFriendIDs retrieves friend IDs from the cache or the database if not found.
 func (f *FriendCacheRedis) GetFriendIDs(ctx context.Context, ownerUserID string) (friendIDs []string, err error) {
 	return getCache(ctx, f.rcClient, f.getFriendIDsKey(ownerUserID), f.expireTime, func(ctx context.Context) ([]string, error) {
@@ -145,6 +150,7 @@ func (f *FriendCacheRedis) DelTwoWayFriendIDs(ctx context.Context, ownerUserID s
 	return newFriendCache
 }
 
+// rockscache获取用户指定好友信息（redis->db）
 // GetFriend retrieves friend info from the cache or the database if not found.
 func (f *FriendCacheRedis) GetFriend(ctx context.Context, ownerUserID, friendUserID string) (friend *relationtb.FriendModel, err error) {
 	return getCache(ctx, f.rcClient, f.getFriendKey(ownerUserID,

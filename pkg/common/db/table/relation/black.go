@@ -21,6 +21,7 @@ import (
 	"github.com/openimsdk/tools/db/pagination"
 )
 
+// 屏蔽/拉黑
 type BlackModel struct {
 	OwnerUserID    string    `bson:"owner_user_id"`
 	BlockUserID    string    `bson:"block_user_id"`

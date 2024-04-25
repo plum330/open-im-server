@@ -7,6 +7,8 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// 序列号 seq redis缓存管理使用的结构是String
+
 type SeqCache interface {
 	SetMaxSeq(ctx context.Context, conversationID string, maxSeq int64) error
 	GetMaxSeqs(ctx context.Context, conversationIDs []string) (map[string]int64, error)
@@ -36,30 +38,37 @@ func NewSeqCache(rdb redis.UniversalClient) SeqCache {
 	return &seqCache{rdb: rdb}
 }
 
+// seq redis缓存管理使用的是普通的redis client， 所以几乎所有的seq读写操作都完全依赖redis
 type seqCache struct {
 	rdb redis.UniversalClient
 }
 
+// 当前会话max seq key
 func (c *seqCache) getMaxSeqKey(conversationID string) string {
 	return maxSeq + conversationID
 }
 
+// 当前会话min seq key
 func (c *seqCache) getMinSeqKey(conversationID string) string {
 	return minSeq + conversationID
 }
 
+// 用户单签会话已读seq key
 func (c *seqCache) getHasReadSeqKey(conversationID string, userID string) string {
 	return hasReadSeq + userID + ":" + conversationID
 }
 
+// 用户当前会话min seq key
 func (c *seqCache) getConversationUserMinSeqKey(conversationID, userID string) string {
 	return conversationUserMinSeq + conversationID + "u:" + userID
 }
 
+// 保存当前会话seq key
 func (c *seqCache) setSeq(ctx context.Context, conversationID string, seq int64, getkey func(conversationID string) string) error {
 	return errs.Wrap(c.rdb.Set(ctx, getkey(conversationID), seq, 0).Err())
 }
 
+// 获取当前会话seq key
 func (c *seqCache) getSeq(ctx context.Context, conversationID string, getkey func(conversationID string) string) (int64, error) {
 	val, err := c.rdb.Get(ctx, getkey(conversationID)).Int64()
 	if err != nil {
@@ -84,22 +93,27 @@ func (c *seqCache) getSeqs(ctx context.Context, items []string, getkey func(s st
 	return m, nil
 }
 
+// 保存当前会话max seq (redis string)
 func (c *seqCache) SetMaxSeq(ctx context.Context, conversationID string, maxSeq int64) error {
 	return c.setSeq(ctx, conversationID, maxSeq, c.getMaxSeqKey)
 }
 
+// 获取多个会话对应的max seq
 func (c *seqCache) GetMaxSeqs(ctx context.Context, conversationIDs []string) (m map[string]int64, err error) {
 	return c.getSeqs(ctx, conversationIDs, c.getMaxSeqKey)
 }
 
+// 获取一个会话对应的max seq
 func (c *seqCache) GetMaxSeq(ctx context.Context, conversationID string) (int64, error) {
 	return c.getSeq(ctx, conversationID, c.getMaxSeqKey)
 }
 
+// 保存当前会话min seq
 func (c *seqCache) SetMinSeq(ctx context.Context, conversationID string, minSeq int64) error {
 	return c.setSeq(ctx, conversationID, minSeq, c.getMinSeqKey)
 }
 
+// 设置多个会话对应的seq(redis string)
 func (c *seqCache) setSeqs(ctx context.Context, seqs map[string]int64, getkey func(key string) string) error {
 	for conversationID, seq := range seqs {
 		if err := c.rdb.Set(ctx, getkey(conversationID), seq, 0).Err(); err != nil {
@@ -121,6 +135,7 @@ func (c *seqCache) GetMinSeq(ctx context.Context, conversationID string) (int64,
 	return c.getSeq(ctx, conversationID, c.getMinSeqKey)
 }
 
+// 获取用户当前会话min seq
 func (c *seqCache) GetConversationUserMinSeq(ctx context.Context, conversationID string, userID string) (int64, error) {
 	val, err := c.rdb.Get(ctx, c.getConversationUserMinSeqKey(conversationID, userID)).Int64()
 	if err != nil {
@@ -129,50 +144,59 @@ func (c *seqCache) GetConversationUserMinSeq(ctx context.Context, conversationID
 	return val, nil
 }
 
+// 获取多个用户当前会话min seq
 func (c *seqCache) GetConversationUserMinSeqs(ctx context.Context, conversationID string, userIDs []string) (m map[string]int64, err error) {
 	return c.getSeqs(ctx, userIDs, func(userID string) string {
 		return c.getConversationUserMinSeqKey(conversationID, userID)
 	})
 }
 
+// 保存用户当前会话min seq
 func (c *seqCache) SetConversationUserMinSeq(ctx context.Context, conversationID string, userID string, minSeq int64) error {
 	return errs.Wrap(c.rdb.Set(ctx, c.getConversationUserMinSeqKey(conversationID, userID), minSeq, 0).Err())
 }
 
+// 保存当前会话多个用户min seq
 func (c *seqCache) SetConversationUserMinSeqs(ctx context.Context, conversationID string, seqs map[string]int64) (err error) {
 	return c.setSeqs(ctx, seqs, func(userID string) string {
 		return c.getConversationUserMinSeqKey(conversationID, userID)
 	})
 }
 
+// 保存用户多个会话min seq
 func (c *seqCache) SetUserConversationsMinSeqs(ctx context.Context, userID string, seqs map[string]int64) (err error) {
 	return c.setSeqs(ctx, seqs, func(conversationID string) string {
 		return c.getConversationUserMinSeqKey(conversationID, userID)
 	})
 }
 
+// 保存用户当前会话已读seq
 func (c *seqCache) SetHasReadSeq(ctx context.Context, userID string, conversationID string, hasReadSeq int64) error {
 	return errs.Wrap(c.rdb.Set(ctx, c.getHasReadSeqKey(conversationID, userID), hasReadSeq, 0).Err())
 }
 
+// 保存当前会话多个用户已读seq
 func (c *seqCache) SetHasReadSeqs(ctx context.Context, conversationID string, hasReadSeqs map[string]int64) error {
 	return c.setSeqs(ctx, hasReadSeqs, func(userID string) string {
 		return c.getHasReadSeqKey(conversationID, userID)
 	})
 }
 
+// 保存用户多个会话已读seq
 func (c *seqCache) UserSetHasReadSeqs(ctx context.Context, userID string, hasReadSeqs map[string]int64) error {
 	return c.setSeqs(ctx, hasReadSeqs, func(conversationID string) string {
 		return c.getHasReadSeqKey(conversationID, userID)
 	})
 }
 
+// 获取当前用户多个会话已读seq
 func (c *seqCache) GetHasReadSeqs(ctx context.Context, userID string, conversationIDs []string) (map[string]int64, error) {
 	return c.getSeqs(ctx, conversationIDs, func(conversationID string) string {
 		return c.getHasReadSeqKey(conversationID, userID)
 	})
 }
 
+// 获取用户当前会话已读seq
 func (c *seqCache) GetHasReadSeq(ctx context.Context, userID string, conversationID string) (int64, error) {
 	val, err := c.rdb.Get(ctx, c.getHasReadSeqKey(conversationID, userID)).Int64()
 	if err != nil {

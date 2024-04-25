@@ -354,7 +354,10 @@ func (g *groupDatabase) MapGroupMemberNum(ctx context.Context, groupIDs []string
 	return m, nil
 }
 
+// 群主转让
+
 func (g *groupDatabase) TransferGroupOwner(ctx context.Context, groupID string, oldOwnerUserID, newOwnerUserID string, roleLevel int32) error {
+	// mongo tx
 	return g.ctxTx.Transaction(ctx, func(ctx context.Context) error {
 		if err := g.groupMemberDB.UpdateRoleLevel(ctx, groupID, oldOwnerUserID, roleLevel); err != nil {
 			return err

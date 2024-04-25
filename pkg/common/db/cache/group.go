@@ -75,6 +75,7 @@ type GroupCache interface {
 	DelGroupsMemberNum(groupID ...string) GroupCache
 }
 
+// 群组redis缓存使用了rockscache保证数据一致性
 type GroupCacheRedis struct {
 	metaCache
 	groupDB        relationtb.GroupModelInterface
@@ -119,26 +120,32 @@ func (g *GroupCacheRedis) NewCache() GroupCache {
 	}
 }
 
+// 获取群key
 func (g *GroupCacheRedis) getGroupInfoKey(groupID string) string {
 	return cachekey.GetGroupInfoKey(groupID)
 }
 
+// 获取用户加入群key
 func (g *GroupCacheRedis) getJoinedGroupsKey(userID string) string {
 	return cachekey.GetJoinedGroupsKey(userID)
 }
 
+// 获取群成员对应的hash key
 func (g *GroupCacheRedis) getGroupMembersHashKey(groupID string) string {
 	return cachekey.GetGroupMembersHashKey(groupID)
 }
 
+// 获取群成员ids对应key
 func (g *GroupCacheRedis) getGroupMemberIDsKey(groupID string) string {
 	return cachekey.GetGroupMemberIDsKey(groupID)
 }
 
+// 获取群中指定成员信息key
 func (g *GroupCacheRedis) getGroupMemberInfoKey(groupID, userID string) string {
 	return cachekey.GetGroupMemberInfoKey(groupID, userID)
 }
 
+// 群成员数量key
 func (g *GroupCacheRedis) getGroupMemberNumKey(groupID string) string {
 	return cachekey.GetGroupMemberNumKey(groupID)
 }
@@ -169,6 +176,8 @@ func (g *GroupCacheRedis) GetGroupMemberIndex(groupMember *relationtb.GroupMembe
 	return 0, errIndex
 }
 
+// 获取多个群信息 -- rockscache
+
 func (g *GroupCacheRedis) GetGroupsInfo(ctx context.Context, groupIDs []string) (groups []*relationtb.GroupModel, err error) {
 	return batchGetCache2(ctx, g.rcClient, g.expireTime, groupIDs, func(groupID string) string {
 		return g.getGroupInfoKey(groupID)
@@ -176,6 +185,8 @@ func (g *GroupCacheRedis) GetGroupsInfo(ctx context.Context, groupIDs []string) 
 		return g.groupDB.Take(ctx, groupID)
 	})
 }
+
+// 获取指定群信息 -- rockscache
 
 func (g *GroupCacheRedis) GetGroupInfo(ctx context.Context, groupID string) (group *relationtb.GroupModel, err error) {
 	return getCache(ctx, g.rcClient, g.getGroupInfoKey(groupID), g.expireTime, func(ctx context.Context) (*relationtb.GroupModel, error) {
@@ -219,6 +230,8 @@ func (g *GroupCacheRedis) DelGroupAllRoleLevel(groupID string) GroupCache {
 	return g.DelGroupRoleLevel(groupID, []int32{constant.GroupOwner, constant.GroupAdmin, constant.GroupOrdinaryUsers})
 }
 
+// hash用于比较？
+
 func (g *GroupCacheRedis) GetGroupMembersHash(ctx context.Context, groupID string) (hashCode uint64, err error) {
 	if g.groupHash == nil {
 		return 0, errs.ErrInternalServer.WrapMsg("group hash is nil")
@@ -256,12 +269,14 @@ func (g *GroupCacheRedis) DelGroupMembersHash(groupID string) GroupCache {
 	return cache
 }
 
+// 获取群成员ids
 func (g *GroupCacheRedis) GetGroupMemberIDs(ctx context.Context, groupID string) (groupMemberIDs []string, err error) {
 	return getCache(ctx, g.rcClient, g.getGroupMemberIDsKey(groupID), g.expireTime, func(ctx context.Context) ([]string, error) {
 		return g.groupMemberDB.FindMemberUserID(ctx, groupID)
 	})
 }
 
+// 获取多个群对应的成员ids
 func (g *GroupCacheRedis) GetGroupsMemberIDs(ctx context.Context, groupIDs []string) (map[string][]string, error) {
 	m := make(map[string][]string)
 	for _, groupID := range groupIDs {
@@ -282,12 +297,14 @@ func (g *GroupCacheRedis) DelGroupMemberIDs(groupID string) GroupCache {
 	return cache
 }
 
+// 获取用户加入的群ids
 func (g *GroupCacheRedis) GetJoinedGroupIDs(ctx context.Context, userID string) (joinedGroupIDs []string, err error) {
 	return getCache(ctx, g.rcClient, g.getJoinedGroupsKey(userID), g.expireTime, func(ctx context.Context) ([]string, error) {
 		return g.groupMemberDB.FindUserJoinedGroupID(ctx, userID)
 	})
 }
 
+// 删除加入群的用户
 func (g *GroupCacheRedis) DelJoinedGroupID(userIDs ...string) GroupCache {
 	keys := make([]string, 0, len(userIDs))
 	for _, userID := range userIDs {
@@ -299,12 +316,14 @@ func (g *GroupCacheRedis) DelJoinedGroupID(userIDs ...string) GroupCache {
 	return cache
 }
 
+// 获取群指定用户信息
 func (g *GroupCacheRedis) GetGroupMemberInfo(ctx context.Context, groupID, userID string) (groupMember *relationtb.GroupMemberModel, err error) {
 	return getCache(ctx, g.rcClient, g.getGroupMemberInfoKey(groupID, userID), g.expireTime, func(ctx context.Context) (*relationtb.GroupMemberModel, error) {
 		return g.groupMemberDB.Take(ctx, groupID, userID)
 	})
 }
 
+// 获取群多个用户的信息
 func (g *GroupCacheRedis) GetGroupMembersInfo(ctx context.Context, groupID string, userIDs []string) ([]*relationtb.GroupMemberModel, error) {
 	return batchGetCache2(ctx, g.rcClient, g.expireTime, userIDs, func(userID string) string {
 		return g.getGroupMemberInfoKey(groupID, userID)
@@ -361,6 +380,7 @@ func (g *GroupCacheRedis) DelGroupMembersInfo(groupID string, userIDs ...string)
 	return cache
 }
 
+// 获取群组成员数量
 func (g *GroupCacheRedis) GetGroupMemberNum(ctx context.Context, groupID string) (memberNum int64, err error) {
 	return getCache(ctx, g.rcClient, g.getGroupMemberNumKey(groupID), g.expireTime, func(ctx context.Context) (int64, error) {
 		return g.groupMemberDB.TakeGroupMemberNum(ctx, groupID)

@@ -21,6 +21,7 @@ const (
 	SubscribeUser = "subscribe_user"
 )
 
+// 关注？
 // SubscribeUserModel collection structure.
 type SubscribeUserModel struct {
 	UserID     string   `bson:"user_id"      json:"userID"`

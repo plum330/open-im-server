@@ -21,6 +21,7 @@ import (
 	"github.com/openimsdk/tools/db/pagination"
 )
 
+// 加群申请
 type GroupRequestModel struct {
 	UserID        string    `bson:"user_id"`
 	GroupID       string    `bson:"group_id"`

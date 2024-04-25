@@ -21,6 +21,7 @@ import (
 	"github.com/openimsdk/tools/db/pagination"
 )
 
+// 好友申请
 type FriendRequestModel struct {
 	FromUserID    string    `bson:"from_user_id"`
 	ToUserID      string    `bson:"to_user_id"`

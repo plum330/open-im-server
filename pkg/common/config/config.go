@@ -34,6 +34,8 @@ type CacheConfig struct {
 	FailedExpire  int    `mapstructure:"failedExpire"`
 }
 
+// 此处的本地缓存配置作用是？ --- 通过redis进行订阅发布的？ lru
+
 type LocalCache struct {
 	User         CacheConfig `mapstructure:"user"`
 	Group        CacheConfig `mapstructure:"group"`
@@ -167,6 +169,8 @@ type Prometheus struct {
 	Ports  []int `mapstructure:"ports"`
 }
 
+// 接入层服务模块
+
 type MsgGateway struct {
 	RPC struct {
 		RegisterIP string `mapstructure:"registerIP"`
@@ -186,6 +190,8 @@ type MsgGateway struct {
 type MsgTransfer struct {
 	Prometheus Prometheus `mapstructure:"prometheus"`
 }
+
+// 推送服务模块
 
 type Push struct {
 	RPC struct {
@@ -220,6 +226,8 @@ type Push struct {
 	} `mapstructure:"iosPush"`
 }
 
+// 鉴权服务模块
+
 type Auth struct {
 	RPC struct {
 		RegisterIP string `mapstructure:"registerIP"`
@@ -232,6 +240,8 @@ type Auth struct {
 	} `mapstructure:"tokenPolicy"`
 }
 
+// 会话服务模块
+
 type Conversation struct {
 	RPC struct {
 		RegisterIP string `mapstructure:"registerIP"`
@@ -240,6 +250,8 @@ type Conversation struct {
 	} `mapstructure:"rpc"`
 	Prometheus Prometheus `mapstructure:"prometheus"`
 }
+
+// 好友服务模块
 
 type Friend struct {
 	RPC struct {
@@ -250,6 +262,8 @@ type Friend struct {
 	Prometheus Prometheus `mapstructure:"prometheus"`
 }
 
+// 群组服务模块
+
 type Group struct {
 	RPC struct {
 		RegisterIP string `mapstructure:"registerIP"`
@@ -258,6 +272,8 @@ type Group struct {
 	} `mapstructure:"rpc"`
 	Prometheus Prometheus `mapstructure:"prometheus"`
 }
+
+// 消息服务模块
 
 type Msg struct {
 	RPC struct {
@@ -352,6 +368,9 @@ type Share struct {
 	RpcRegisterName RpcRegisterName `mapstructure:"rpcRegisterName"`
 	IMAdminUserID   []string        `mapstructure:"imAdminUserID"`
 }
+
+// 服务模块(用户/好友/消息/推送/接入层/群组/鉴权/会话)
+
 type RpcRegisterName struct {
 	User           string `mapstructure:"user"`
 	Friend         string `mapstructure:"friend"`
