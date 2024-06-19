@@ -262,6 +262,10 @@ func (och *OnlineHistoryRedisConsumerHandler) handleMsg(ctx context.Context, key
 	och.toPushTopic(ctx, key, conversationID, notStorageList)
 	if len(storageList) > 0 {
 		// 处理需要存储的消息列表：存储消息 / 保存当前conversation max seq / 保存当前conversation发送者已读seq
+		/*
+			在msg-transfer中先把消息批量保存到redis， 然后再通过mq异步保存到mongo（这里的kafka消息消费者仍然是msg-transfer）。原因是：先保存到redis速度快，以便还未保存到mongo前，
+			客户端可以pull msg seq查询到发送的消息，在保存到mongo后，再把redis中保存的消息删除掉。
+		*/
 		lastSeq, isNewConversation, err := och.msgDatabase.BatchInsertChat2Cache(ctx, conversationID, storageList)
 		if err != nil && errs.Unwrap(err) != redis.Nil {
 			log.ZError(ctx, "batch data insert to redis err", err, "storageMsgList", storageList)

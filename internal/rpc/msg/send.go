@@ -51,8 +51,48 @@ import (
 		SendTime int64
 		Msg      []byte // 一条消息内容
 	}
-	从getSeqUid该函数可知，为每个uid设置了5000个收件箱，通过getSeqUid函数生成索引标识来定位seq属于哪个收件箱，每个收件箱是一个msg info数组。
-	一个收件箱大小是5000条msg（即一个会话只存储5000条消息）?
+	从getSeqUid该函数可知，为每个uid（每个群/发送者）设置了5000个收件箱，通过getSeqUid函数生成索引标识来定位seq属于哪个收件箱，每个收件箱是一个msg info数组。
+	一个收件箱大小是5000条msg
+*/
+
+/*
+v2.3.3 msg-transfer服务批量插入mongo逻辑如下：
+给每个用户设置了一个收件箱组（5000个收件箱，收件箱0 ~ 收件箱4999），限制了每次保存的消息量不超过5000条。
+1. 计算mongo document中数组剩余容量（根据last max seq计算），具体如下：
+blk0 := uint64(GetSingleGocMsgNum() - 1) // document中数组下标从0开始
+if currentMaxSeq < uint64(GetSingleGocMsgNum()) {
+// 计算第一个收件箱（收件箱0）余量
+remain = blk0 - currentMaxSeq //1
+} else {
+// 计算收件箱组中非收件箱0的第一个未填满的收件箱的余量
+excludeBlk0 := currentMaxSeq - blk0 //=1
+//(5000-1)%5000 == 4999
+remain = (uint64(GetSingleGocMsgNum()) - (excludeBlk0 % uint64(GetSingleGocMsgNum()))) % uint64(GetSingleGocMsgNum())
+}
+2. 遍历消息列表，把每条消息放入到document数组中，如果当前收件箱余量被填满用完，则把多的消息填入到新的document数组中，代码如下：
+if insertCounter < remain {
+// 上一个未填满的收件箱
+msgListToMongo = append(msgListToMongo, sMsg)
+insertCounter++
+ //seq_uid = string(user_id:currentMaxSeq/5000), 定位到这条消息应该哪个收件箱（收件箱0 ~ 收件箱4999），
+ //  这里的user_id指的是kafka消息发送的key指，可能是group_id/sender_id（sender_receiver_id）
+ //  seq_uid对应的就是UserChat模型中的uid。
+ //  那么if这个分支中的所有msg的seq_uid是相同的；同理下面else分支中的所有的msg的seq_uid_next也是相同的。
+ //  既然seq_uid的作用是定位到具体的收件箱，那么保存消息时把消息列表追加/插入到对应的document中。
+ //  由于每次批量保存的消息量限制不超过5000条，那么每次最多同时更新两个document（msgListToMongo/msgListToMongoNext）。
+seqUid = getSeqUid(userID, uint32(currentMaxSeq))
+log.Debug(operationID, "msgListToMongo ", seqUid, m.MsgData.Seq, m.MsgData.ClientMsgID, insertCounter, remain, "userID: ", userID)
+} else {
+// 需要一个新的收件箱
+msgListToMongoNext = append(msgListToMongoNext, sMsg)
+// seq_uid_next对应的一定是不存在的document记录，所以这种情况只需要执行insert操作
+seqUidNext = getSeqUid(userID, uint32(currentMaxSeq))
+log.Debug(operationID, "msgListToMongoNext ", seqUidNext, m.MsgData.Seq, m.MsgData.ClientMsgID, insertCounter, remain, "userID: ", userID)
+}
+
+3. 依次判断seq_uid和seq_uid_next是否为空，若对应的seq_uid不是空，则保存对应的document数组。
+如果seq_uid不为空，则对应的document记录存在性不确定，则首先通过FindAndUpdate进行消息列表追加，如果是记录不存在错误，则执行Insert操作。
+如果seq_uid_next不为空，则说明对应的document记录一定不存在，只需要执行Insert操作。
 */
 
 func (m *msgServer) SendMsg(ctx context.Context, req *pbmsg.SendMsgReq) (*pbmsg.SendMsgResp, error) {
