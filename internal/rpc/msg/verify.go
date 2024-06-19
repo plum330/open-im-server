@@ -128,6 +128,7 @@ func (m *msgServer) messageVerification(ctx context.Context, data *msg.SendMsgRe
 	}
 }
 
+// 发送的这些消息具体content，都是在openim sdk core里面构建好的
 func (m *msgServer) encapsulateMsgData(msg *sdkws.MsgData) {
 	// 生成msg id md5(时间 + send id + 随机数)
 	msg.ServerMsgID = GetMsgID(msg.SendID)

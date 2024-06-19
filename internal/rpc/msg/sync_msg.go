@@ -28,6 +28,74 @@ import (
 	"github.com/openimsdk/tools/log"
 )
 
+/*
+v2.3.3
+消息同步PullMessageBySeqList过程如下：
+type PullMessageBySeqsReq struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	UserID    string      `protobuf:"bytes,1,opt,name=userID,proto3" json:"userID"`
+	SeqRanges []*SeqRange `protobuf:"bytes,2,rep,name=seqRanges,proto3" json:"seqRanges"`
+	Order     PullOrder   `protobuf:"varint,3,opt,name=order,proto3,enum=openim.sdkws.PullOrder" json:"order"`
+}
+type SeqRange struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	ConversationID string `protobuf:"bytes,1,opt,name=conversationID,proto3" json:"conversationID"`
+	Begin          int64  `protobuf:"varint,2,opt,name=begin,proto3" json:"begin"`
+	End            int64  `protobuf:"varint,3,opt,name=end,proto3" json:"end"`
+	Num            int64  `protobuf:"varint,4,opt,name=num,proto3" json:"num"`
+}
+1. 根据发送的请求，获取user_id多个会话的消息，每个conversation_id设置了seq开始结束及条数
+2. 调用msg服务，msg调用conversation服务获取对应的conversation信息，并保存在msg服务内存中
+3. 从redis中获取conversation对应的max/min seq及msg(先从redis中获取消息，未获取到的再从mongo中获取)
+4. 返回结果map[conversation_id]*msg
+
+注意v2.3.3从mongo查询消息的过程如下GetMsgBySeqListMongo2：
+// 从收件箱存储可知，查询时也只需关系用户对应的所有seq（不关conversation）
+m := func(uid string, seqList []uint32) map[string][]uint32 {
+		t := make(map[string][]uint32)
+		for i := 0; i < len(seqList); i++ {
+			seqUid := getSeqUid(uid, seqList[i])
+			if value, ok := t[seqUid]; !ok {
+				var temp []uint32
+				t[seqUid] = append(temp, seqList[i])
+			} else {
+				t[seqUid] = append(value, seqList[i])
+			}
+		}
+		return t
+	}(uid, seqList)
+
+	// 遍历每个seq_uid
+	for seqUid, value := range m {
+		if err = c.FindOne(ctx, bson.M{"uid": seqUid}).Decode(&sChat); err != nil {
+			log.NewError(operationID, "not find seqUid", seqUid, value, uid, seqList, err.Error())
+			continue
+		}
+		singleCount = 0
+		for i := 0; i < len(sChat.Msg); i++ {
+			msg := new(open_im_sdk.MsgData)
+			if err = proto.Unmarshal(sChat.Msg[i].Msg, msg); err != nil {
+				log.NewError(operationID, "Unmarshal err", seqUid, value, uid, seqList, err.Error())
+				return nil, err
+			}
+			if isContainInt32(msg.Seq, value) {
+				seqMsg = append(seqMsg, msg)
+				hasSeqList = append(hasSeqList, msg.Seq)
+				singleCount++
+				if singleCount == len(value) {
+					break
+				}
+			}
+		}
+	}
+*/
+
 func (m *msgServer) PullMessageBySeqs(ctx context.Context, req *sdkws.PullMessageBySeqsReq) (*sdkws.PullMessageBySeqsResp, error) {
 	resp := &sdkws.PullMessageBySeqsResp{}
 	resp.Msgs = make(map[string]*sdkws.PullMsgs)
@@ -85,6 +153,13 @@ func (m *msgServer) PullMessageBySeqs(ctx context.Context, req *sdkws.PullMessag
 	}
 	return resp, nil
 }
+
+/*
+v2.3.3
+获取一个用户的max_seq/min_seq流程如下：
+1. msg RPC调用conversation获取user_id对应的conversation_ids，本在本地local lru(服务内存中)中存储这些conversation_ids
+2. 从redis中获取conversation_id对应的max_seq (因为set max seq是在msg-transfer服务中执行的，但这里又直接访问的redis，所以这两个服务共用了redis)
+*/
 
 func (m *msgServer) GetMaxSeq(ctx context.Context, req *sdkws.GetMaxSeqReq) (*sdkws.GetMaxSeqResp, error) {
 	if err := authverify.CheckAccessV3(ctx, req.UserID, m.config.Share.IMAdminUserID); err != nil {

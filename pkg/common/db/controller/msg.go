@@ -365,7 +365,13 @@ func (db *commonMsgDatabase) BatchInsertChat2Cache(ctx context.Context, conversa
 		return 0, false, err
 	}
 	lenList := len(msgs)
-	// 保存最新的100条
+	/*
+		批量插入redis时，每个会话每次保存100条， 每条消息保存到redis时，key：conversation_id - seq: 一条消息内容， 时间24h
+		conversation key -> max_seq/min_seq  string， 如果这个conversation key不存在说明是new conversation(
+		1. 如果是群聊，先调用群管理服务获取群成员ID， 在调用会话服务创建会话
+		2. 如果是私聊，调用conversation服务创建会话
+		)
+	*/
 	if int64(lenList) > db.msgTable.GetSingleGocMsgNum() {
 		return 0, false, errs.New("message count exceeds limit", "limit", db.msgTable.GetSingleGocMsgNum()).Wrap()
 	}

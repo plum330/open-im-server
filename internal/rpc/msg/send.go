@@ -42,6 +42,7 @@ import (
 	在v2.3.3版本中，采用的是写扩散方案：
 	对于私聊，消息拆分 1—>2，方便写入各自的收件箱
 	对于群发，获取群用户列表后，sendMsgToGroupOptimization 将群发消息1->N条后进行单条转发(通过对群成员分组并发执行-20个user一组启动一个goroutine)
+	私聊和群聊拆分后的单条消息，发送到kafka的消息key都是单个的user_id（而且v2.3.3中整个系统的kafka消息发送过程中，消息发送的key都是一样的。）
 	消息发送到msg-transfer后，采用收件箱的方案存储消息到mongo document，document结构如下：
 	type UserChat struct {
 		UID string
@@ -51,10 +52,11 @@ import (
 		SendTime int64
 		Msg      []byte // 一条消息内容
 	}
-	从getSeqUid该函数可知，为每个uid（每个群/发送者）设置了5000个收件箱，通过getSeqUid函数生成索引标识来定位seq属于哪个收件箱，每个收件箱是一个msg info数组。
+	从getSeqUid该函数可知，为每个uid（每个群/发送者）设置了5000个收件箱（但是好像seq_uid_next一直是insert，这样会超过5000， 那么不应该是5000个收件箱；
+	只是这些不同的document中uid字段可能相同。v2.3.3中通过定时任务清理需要过期的收件箱消息），通过getSeqUid函数生成索引标识来定位seq属于哪个收件箱，每个收件箱是一个msg info数组。
 	一个收件箱大小是5000条msg
 */
-
+// 注意在v2.3.3中所有的conversation好像是共用的seq，即redis中存储的user max seq是对所有的conversation而言的！！！（应该还是要做成单独conversation对应单独的seq，这样查询消息时通过conversation_id和seq进行拉取）
 /*
 v2.3.3 msg-transfer服务批量插入mongo逻辑如下：
 给每个用户设置了一个收件箱组（5000个收件箱，收件箱0 ~ 收件箱4999），限制了每次保存的消息量不超过5000条。
@@ -75,6 +77,7 @@ if insertCounter < remain {
 msgListToMongo = append(msgListToMongo, sMsg)
 insertCounter++
  //seq_uid = string(user_id:currentMaxSeq/5000), 定位到这条消息应该哪个收件箱（收件箱0 ~ 收件箱4999），
+ //（注意这里的currentMaxSeq在计算时与conversation_id无关，即在往收件箱存储消息时，无关conversation只要seq_uid计算结果相同就存在一个document）
  //  这里的user_id指的是kafka消息发送的key指，可能是group_id/sender_id（sender_receiver_id）
  //  seq_uid对应的就是UserChat模型中的uid。
  //  那么if这个分支中的所有msg的seq_uid是相同的；同理下面else分支中的所有的msg的seq_uid_next也是相同的。
@@ -94,6 +97,8 @@ log.Debug(operationID, "msgListToMongoNext ", seqUidNext, m.MsgData.Seq, m.MsgDa
 如果seq_uid不为空，则对应的document记录存在性不确定，则首先通过FindAndUpdate进行消息列表追加，如果是记录不存在错误，则执行Insert操作。
 如果seq_uid_next不为空，则说明对应的document记录一定不存在，只需要执行Insert操作。
 */
+
+// 不管是私聊还是群聊都是基于会话的前提
 
 func (m *msgServer) SendMsg(ctx context.Context, req *pbmsg.SendMsgReq) (*pbmsg.SendMsgResp, error) {
 	if req.MsgData != nil {
@@ -224,7 +229,7 @@ func (m *msgServer) sendMsgSingleChat(ctx context.Context, req *pbmsg.SendMsgReq
 			return nil, err
 		}
 
-		// msg模块通过kafka发送消息到 msg-transfer (topic: ToRedisTopic)， GenConversationUniqueKeyForSingle构造消息发送的key:send_id 和 receive_id
+		// msg模块通过kafka发送消息到 msg-transfer (topic: ToRedisTopic)， GenConversationUniqueKeyForSingle构造消息发送的key:send_id 和 receive_id（这和后面构建conversation_id:msgprocessor.GetChatConversationIDByMsg(ctxMsgList[0].message)相对应）
 		if err := m.MsgDatabase.MsgToMQ(ctx, conversationutil.GenConversationUniqueKeyForSingle(req.MsgData.SendID, req.MsgData.RecvID), req.MsgData); err != nil {
 			prommetrics.SingleChatMsgProcessFailedCounter.Inc()
 			return nil, err

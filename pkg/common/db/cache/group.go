@@ -230,7 +230,11 @@ func (g *GroupCacheRedis) DelGroupAllRoleLevel(groupID string) GroupCache {
 	return g.DelGroupRoleLevel(groupID, []int32{constant.GroupOwner, constant.GroupAdmin, constant.GroupOrdinaryUsers})
 }
 
-// hash用于比较？
+/*
+v2.3.3版本，超级群消息发送，在本地local cache中保存了一份群成员列表及对应的hash code，在超级群发送消息时，通过计算群成员列表hash code与
+local cache中的hash code比较，如果hash code相等说明，群成员午变化，直接用local cache中的成员列表就可以；如果hash code不相等，则需要
+重新获取群成员列表数据。
+*/
 
 func (g *GroupCacheRedis) GetGroupMembersHash(ctx context.Context, groupID string) (hashCode uint64, err error) {
 	if g.groupHash == nil {

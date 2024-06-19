@@ -40,6 +40,11 @@ func GetNotificationConversationIDByMsg(msg *sdkws.MsgData) string {
 	return ""
 }
 
+//conversation_id生成规则(在msg-transfer服务生成)
+//私聊：对send_id和receiver_id进行排序后，通过_连接成字符串，前缀s_
+//群聊：就是group_id字符串，前缀g_
+//通知：前缀n_, 关注系统通知是怎么发送的
+
 func GetChatConversationIDByMsg(msg *sdkws.MsgData) string {
 	switch msg.SessionType {
 	case constant.SingleChatType:
