@@ -231,9 +231,23 @@ func (g *GroupCacheRedis) DelGroupAllRoleLevel(groupID string) GroupCache {
 }
 
 /*
-v2.3.3版本，超级群消息发送，在本地local cache中保存了一份群成员列表及对应的hash code，在超级群发送消息时，通过计算群成员列表hash code与
+v2.3.3版本，群发/超级群消息发送，在本地local cache中保存了一份群成员列表及对应的hash code，在超级群发送消息时，通过计算群成员列表hash code与
 local cache中的hash code比较，如果hash code相等说明，群成员午变化，直接用local cache中的成员列表就可以；如果hash code不相等，则需要
 重新获取群成员列表数据。
+
+在v2.3.3版本中的群发/超级群发，都会使用的是GetGroupMemberUserIDList，首先从redis（rockscache）中获取服务端最新的group member list计算得到的hash code
+（使用的是GetGroupMemberListHashFromCache， 这个redis缓存值在其他地方是会被更新的，如群成员加入...），然后根据group id从内存中
+也获取对应的hash code（groupInLocalCache, ok := CacheGroupMemberUserIDList[groupID]），如果二者hash code相等，则直接返回内存
+中的群成员列表，否则就调用GetGroupMemberUserIDListFromRemote获取群成员列表，并更新到内存中。
+
+v2.3.3中从消息的存储和发送来看，使用的都是写扩散和收件箱存储。
+1. 因为群发消息时，都使用了sendMsgToGroupOptimization函数进行分组扩散发送
+2. 因为在存储消息时，在mongo中只有这一个表结构:
+type UserChat struct {
+	UID string
+	//ListIndex int `bson:"index"`
+	Msg []MsgInfo
+}
 */
 
 func (g *GroupCacheRedis) GetGroupMembersHash(ctx context.Context, groupID string) (hashCode uint64, err error) {

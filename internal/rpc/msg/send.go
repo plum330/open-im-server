@@ -32,6 +32,13 @@ import (
 	"github.com/openimsdk/tools/utils/stringutil"
 )
 
+/*
+	心跳处理：
+		1. 前端发送ping,服务端回pong
+		2. 后端发送ping，前端回pong
+		3. 心跳异常时，连接主动断开是前端执行的，这样心跳管理更为简单
+*/
+
 // 接收msg-gate的消息调用
 
 /*
@@ -56,14 +63,15 @@ import (
 	只是这些不同的document中uid字段可能相同。v2.3.3中通过定时任务清理需要过期的收件箱消息），通过getSeqUid函数生成索引标识来定位seq属于哪个收件箱，每个收件箱是一个msg info数组。
 	一个收件箱大小是5000条msg
 */
-// 注意在v2.3.3中所有的conversation好像是共用的seq，即redis中存储的user max seq是对所有的conversation而言的！！！（应该还是要做成单独conversation对应单独的seq，这样查询消息时通过conversation_id和seq进行拉取）
+// 注意在v2.3.3中所有的conversation好像是共用的seq，即redis中存储的user max seq是对所有的conversation而言的！！！(这是写扩散收件箱模式)（应该还是要做成单独conversation对应单独的seq，这样查询消息时通过conversation_id和seq进行拉取 -- 这是读扩散模式）
 /*
 v2.3.3 msg-transfer服务批量插入mongo逻辑如下：
-给每个用户设置了一个收件箱组（5000个收件箱，收件箱0 ~ 收件箱4999），限制了每次保存的消息量不超过5000条。
+给每个用户设置了一个收件箱组（5000个收件箱，收件箱0 ~ 收件箱4999），限制了每次保存的消息量不超过5000条。 --- 好像没有限制收件箱大小为5000个docs，只是显示了每个doc存储5000条消息
 1. 计算mongo document中数组剩余容量（根据last max seq计算），具体如下：
 blk0 := uint64(GetSingleGocMsgNum() - 1) // document中数组下标从0开始
 if currentMaxSeq < uint64(GetSingleGocMsgNum()) {
 // 计算第一个收件箱（收件箱0）余量
+// currentMaxSeq指的是上一次结束的max seq(因为发送过程中是保存到redis成功后再发送消息到mongo保存，所以currentMaxSeq最小是1)
 remain = blk0 - currentMaxSeq //1
 } else {
 // 计算收件箱组中非收件箱0的第一个未填满的收件箱的余量

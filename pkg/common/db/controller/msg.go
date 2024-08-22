@@ -239,6 +239,7 @@ func (db *commonMsgDatabase) BatchInsertBlock(ctx context.Context, conversationI
 				continue // The current data has been updated, skip the current data
 			}
 		}
+		// 读扩散存储方案(超级群/万人群): 存储时按照conversation id进行区分，seqSuffix := (seq - 1) / singleGocMsgNum（1-100 : 0， 101-200 : 1, ...），说明每100条存储一个文档
 		doc := relation.MsgDocModel{
 			DocID: db.msgTable.GetDocID(conversationID, seq),
 			Msg:   make([]*relation.MsgInfoModel, num),
