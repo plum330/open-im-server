@@ -28,6 +28,7 @@ func IsNotificationConversationID(conversationID string) bool {
 }
 
 func GenConversationUniqueKeyForSingle(sendID, recvID string) string {
+	// 私聊的MQ key生成规则要规定，保证无论发送方是谁，都当做相同会话处理，这样才能在MQ kafka topic中保证顺序性
 	l := []string{sendID, recvID}
 	sort.Strings(l)
 	return strings.Join(l, "_")

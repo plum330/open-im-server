@@ -312,7 +312,10 @@ func (c *conversationDatabase) SetUserConversations(ctx context.Context, ownerUs
 //	return c.cache.GetSuperGroupRecvMsgNotNotifyUserIDs(ctx, groupID)
 //}
 
+// 创建群会话
+
 func (c *conversationDatabase) CreateGroupChatConversation(ctx context.Context, groupID string, userIDs []string, conversation *relationtb.Conversation) error {
+	// mongo事务
 	return c.tx.Transaction(ctx, func(ctx context.Context) error {
 		cache := c.cache.CloneConversationCache()
 		conversationID := conversation.ConversationID

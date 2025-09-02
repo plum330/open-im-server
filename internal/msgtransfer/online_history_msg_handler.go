@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+
 	"github.com/openimsdk/tools/mq"
 
 	"sync"
@@ -109,6 +110,7 @@ func NewOnlineHistoryRedisConsumerHandler(ctx context.Context, client discovery.
 		hashCode := stringutil.GetHashCode(key)
 		return int(hashCode) % och.redisMessageBatches.Worker()
 	}
+	// 从MQ消息中解析key进行分类合并
 	b.Key = func(consumerMessage *ConsumerMessage) string {
 		return consumerMessage.Key
 	}
@@ -122,21 +124,28 @@ func NewOnlineHistoryRedisConsumerHandler(ctx context.Context, client discovery.
 
 	return &och, nil
 }
+
+// 处理channel中的消息组
 func (och *OnlineHistoryRedisConsumerHandler) do(ctx context.Context, channelID int, val *batcher.Msg[ConsumerMessage]) {
 	ctx = mcontext.WithTriggerIDContext(ctx, val.TriggerID())
 	ctxMessages := och.parseConsumerMessages(ctx, val.Val())
 	ctx = withAggregationCtx(ctx, ctxMessages)
 	log.ZInfo(ctx, "msg arrived channel", "channel id", channelID, "msgList length", len(ctxMessages), "key", val.Key())
+	// 保存已读序列号到mongo
 	och.doSetReadSeq(ctx, ctxMessages)
 
+	// 对消息组中的消息进行再次分类，分为需要存储的消息、不需要存储的消息，需要存储的通知消息，不需要存储的通知消息
 	storageMsgList, notStorageMsgList, storageNotificationList, notStorageNotificationList :=
 		och.categorizeMessageLists(ctxMessages)
 	log.ZDebug(ctx, "number of categorized messages", "storageMsgList", len(storageMsgList), "notStorageMsgList",
 		len(notStorageMsgList), "storageNotificationList", len(storageNotificationList), "notStorageNotificationList", len(notStorageNotificationList))
 
+	// 因为前面是按照MQ消息key进行分组的，所以channel中同一个组的消息属于同一个会话，即它们的会话ID相同 （key与会话ID是一一对应的，会话ID是按照一定规则生成的）
 	conversationIDMsg := msgprocessor.GetChatConversationIDByMsg(ctxMessages[0].message)
 	conversationIDNotification := msgprocessor.GetNotificationConversationIDByMsg(ctxMessages[0].message)
+	// 处理消息
 	och.handleMsg(ctx, val.Key(), conversationIDMsg, storageMsgList, notStorageMsgList)
+	// 处理通知消息
 	och.handleNotification(ctx, val.Key(), conversationIDNotification, storageNotificationList, notStorageNotificationList)
 }
 
@@ -256,6 +265,8 @@ func (och *OnlineHistoryRedisConsumerHandler) handleMsg(ctx context.Context, key
 		log.ZDebug(ctx, "handle storage msg", "msg", storageMsg.message.String())
 	}
 
+	// 首先发送不需要存储的消息到MQ(topic:config.KafkaConfig.ToPushTopic), 这里发送消息的key是之前msg模块发送MQ消息用的key，这样才能保证消息在不同消息Topic之前传输时消息的顺序性。
+	// 所以在整个消息发送的通路中，消息不管是在不同topic之前的传递还是对消息进行分组分类合并还是将消息组分片到channel中，为了保证通路中消息的顺序性，用的key必须是最初的同一个key。
 	och.toPushTopic(ctx, key, conversationID, notStorageList)
 	var storageMessageList []*sdkws.MsgData
 	for _, msg := range storageList {
@@ -263,28 +274,34 @@ func (och *OnlineHistoryRedisConsumerHandler) handleMsg(ctx context.Context, key
 	}
 	if len(storageMessageList) > 0 {
 		msg := storageMessageList[0]
+		// 批量插入消息到redis中，因为redis内存数据库快，首先保存到redis，再异步通过MQ持久化到Mongo
+		// lastSeq是当前会话的上一次消息的最后序列号
 		lastSeq, isNewConversation, userSeqMap, err := och.msgTransferDatabase.BatchInsertChat2Cache(ctx, conversationID, storageMessageList)
 		if err != nil && !errors.Is(errs.Unwrap(err), redis.Nil) {
 			log.ZWarn(ctx, "batch data insert to redis err", err, "storageMsgList", storageMessageList)
 			return
 		}
 		log.ZInfo(ctx, "BatchInsertChat2Cache end")
+		// 标记会话消息组中的消息对发送者而言是已读的（存储到redis，也是因为redis速度快）
 		err = och.msgTransferDatabase.SetHasReadSeqs(ctx, conversationID, userSeqMap)
 		if err != nil {
 			log.ZWarn(ctx, "SetHasReadSeqs error", err, "userSeqMap", userSeqMap, "conversationID", conversationID)
 			prommetrics.SeqSetFailedCounter.Inc()
 		}
+		// 发送者已读存储到redis后，在异步发送到channel处理
 		och.conversationUserHasReadChan <- &userHasReadSeq{
 			conversationID: conversationID,
 			userHasReadMap: userSeqMap,
 		}
 
+		// 新会话
 		if isNewConversation {
 			switch msg.SessionType {
 			case constant.ReadGroupChatType:
 				log.ZDebug(ctx, "group chat first create conversation", "conversationID",
 					conversationID)
 
+				// 从group模块获取群成员ID
 				userIDs, err := och.groupClient.GetGroupMemberUserIDs(ctx, msg.GroupID)
 				if err != nil {
 					log.ZWarn(ctx, "get group member ids error", err, "conversationID",
@@ -292,6 +309,7 @@ func (och *OnlineHistoryRedisConsumerHandler) handleMsg(ctx context.Context, key
 				} else {
 					log.ZInfo(ctx, "GetGroupMemberIDs end")
 
+					// 调用会话模块conversation创建会话
 					if err := och.conversationClient.CreateGroupChatConversations(ctx, msg.GroupID, userIDs); err != nil {
 						log.ZWarn(ctx, "single chat first create conversation error", err,
 							"conversationID", conversationID)
@@ -304,6 +322,7 @@ func (och *OnlineHistoryRedisConsumerHandler) handleMsg(ctx context.Context, key
 					ConversationID:   conversationID,
 					ConversationType: msg.SessionType,
 				}
+				// 调用conversation模块创建会话
 				if err := och.conversationClient.CreateSingleChatConversations(ctx, req); err != nil {
 					log.ZWarn(ctx, "single chat or notification first create conversation error", err,
 						"conversationID", conversationID, "sessionType", msg.SessionType)
@@ -315,6 +334,7 @@ func (och *OnlineHistoryRedisConsumerHandler) handleMsg(ctx context.Context, key
 		}
 
 		log.ZInfo(ctx, "success incr to next topic")
+		// 发送会话需要存储的消息组消息和会话的上一次序列号到MQ(topic: config.KafkaConfig.ToMongoTopic)，进行异步持久化 - 这里是一次性批量发送消息到MQ
 		err = och.msgTransferDatabase.MsgToMongoMQ(ctx, key, conversationID, storageMessageList, lastSeq)
 		if err != nil {
 			log.ZError(ctx, "Msg To MongoDB MQ error", err, "conversationID",
@@ -322,6 +342,7 @@ func (och *OnlineHistoryRedisConsumerHandler) handleMsg(ctx context.Context, key
 		}
 		log.ZInfo(ctx, "MsgToMongoMQ end")
 
+		// 需要存储的消息发送到MQ后，再次把这些消息发送到MQ(topic:topic:config.KafkaConfig.ToPushTopic - 这里并没有对消息拆分扩散，只是循环一条一条的发送消息到push推送模块)，用于推送到长连接
 		och.toPushTopic(ctx, key, conversationID, storageList)
 		log.ZInfo(ctx, "toPushTopic end")
 	}
@@ -359,6 +380,7 @@ func (och *OnlineHistoryRedisConsumerHandler) HandleUserHasReadSeqMessages(ctx c
 
 	defer och.wg.Done()
 
+	// 读取channel中的消息发送者已读，保存到mongo
 	for msg := range och.conversationUserHasReadChan {
 		if err := och.msgTransferDatabase.SetHasReadSeqToDB(ctx, msg.conversationID, msg.userHasReadMap); err != nil {
 			log.ZWarn(ctx, "set read seq to db error", err, "conversationID", msg.conversationID, "userSeqMap", msg.userHasReadMap)
@@ -396,6 +418,7 @@ func withAggregationCtx(ctx context.Context, values []*ContextMsg) context.Conte
 }
 
 func (och *OnlineHistoryRedisConsumerHandler) HandlerRedisMessage(msg mq.Message) error { // a instance in the consumer group
+	// 把接收到的MQ消息放入到batcher的data通道中(进行异步解耦)
 	err := och.redisMessageBatches.Put(msg.Context(), &ConsumerMessage{Ctx: msg.Context(), Key: msg.Key(), Value: msg.Value(), Raw: msg})
 	if err != nil {
 		log.ZWarn(msg.Context(), "put msg to  error", err, "key", msg.Key(), "value", msg.Value())

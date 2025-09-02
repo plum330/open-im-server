@@ -16,6 +16,7 @@ package rpccache
 
 import (
 	"context"
+
 	"github.com/openimsdk/open-im-server/v3/pkg/common/storage/cache/cachekey"
 	"github.com/openimsdk/open-im-server/v3/pkg/rpcli"
 	"github.com/openimsdk/protocol/group"
@@ -53,6 +54,7 @@ type GroupLocalCache struct {
 	local  localcache.Cache[[]byte]
 }
 
+// 从本地缓存中获取群成员
 func (g *GroupLocalCache) getGroupMemberIDs(ctx context.Context, groupID string) (val *group.GetGroupMemberUserIDsResp, err error) {
 	log.ZDebug(ctx, "GroupLocalCache getGroupMemberIDs req", "groupID", groupID)
 	defer func() {
@@ -63,6 +65,7 @@ func (g *GroupLocalCache) getGroupMemberIDs(ctx context.Context, groupID string)
 		}
 	}()
 	var cache cacheProto[group.GetGroupMemberUserIDsResp]
+	// 从本地换成中获取群成员 -> 没找到再从group模块查询群成员 -> 序列化后存储到本地缓存(lru / 过期时间)
 	return cache.Unmarshal(g.local.Get(ctx, cachekey.GetGroupMemberIDsKey(groupID), func(ctx context.Context) ([]byte, error) {
 		log.ZDebug(ctx, "GroupLocalCache getGroupMemberIDs rpc", "groupID", groupID)
 		return cache.Marshal(g.client.GroupClient.GetGroupMemberUserIDs(ctx, &group.GetGroupMemberUserIDsReq{GroupID: groupID}))

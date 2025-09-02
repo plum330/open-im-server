@@ -40,6 +40,8 @@ func (u emptyOnlinePusher) GetOnlinePushFailedUserIDs(ctx context.Context, msg *
 	return nil
 }
 
+// 目前只实现了默认全节点 Default All Node
+
 func NewOnlinePusher(disCov discovery.Conn, config *Config) (OnlinePusher, error) {
 	if conf.Standalone() {
 		return NewDefaultAllNode(disCov, config), nil
@@ -64,8 +66,13 @@ func NewDefaultAllNode(disCov discovery.Conn, config *Config) *DefaultAllNode {
 	return &DefaultAllNode{disCov: disCov, config: config}
 }
 
+// 所有节点 - 目前只实现这种方式
+// 查找在线用户在哪台msggateway节点上(msggateway对应的grpc conn)
+
 func (d *DefaultAllNode) GetConnsAndOnlinePush(ctx context.Context, msg *sdkws.MsgData,
 	pushToUserIDs []string) (wsResults []*msggateway.SingleMsgToUserResults, err error) {
+	// 获取所有的msggateway节点rpc连接 - 根据服务发现方式的不同 - k8s / zk / etcd
+	// 以etcd作为服务发现为例：GetConns就是对比本地缓存的和msggateway rpc连接的变化更新 - msggateway节点下线就剔除，上线就重新建立连接并缓存该连接
 	conns, err := d.disCov.GetConns(ctx, d.config.Discovery.RpcService.MessageGateway)
 	if len(conns) == 0 {
 		log.ZWarn(ctx, "get gateway conn 0 ", nil)
@@ -90,12 +97,14 @@ func (d *DefaultAllNode) GetConnsAndOnlinePush(ctx context.Context, msg *sdkws.M
 
 	wg.SetLimit(maxWorkers)
 
+	// 遍历所有的msggateway节点rpc连接 - 并发推送
 	// Online push message
 	for _, conn := range conns {
 		conn := conn // loop var safe
 		ctx := ctx
 		wg.Go(func() error {
 			msgClient := msggateway.NewMsgGatewayClient(conn)
+			// 向每个msggateway节点推送消息给所有的在线用户pushToUserIDs（不管pushToUserIDs是否全部在该msggateway节点上 - 惊群效应）
 			reply, err := msgClient.SuperGroupOnlineBatchPushOneMsg(ctx, input)
 			if err != nil {
 				log.ZError(ctx, "SuperGroupOnlineBatchPushOneMsg ", err, "req:", input.String())
@@ -152,6 +161,7 @@ func (k *K8sStaticConsistentHash) GetConnsAndOnlinePush(ctx context.Context, msg
 
 	var usersHost = make(map[string][]string)
 	for _, v := range pushToUserIDs {
+		// 获取一个用户所在的msggateway - 未实现！！！
 		tHost, err := k.disCov.GetUserIdHashGatewayHost(ctx, v)
 		if err != nil {
 			log.ZError(ctx, "get msg gateway hash error", err)
@@ -162,6 +172,7 @@ func (k *K8sStaticConsistentHash) GetConnsAndOnlinePush(ctx context.Context, msg
 			tUsers = append(tUsers, v)
 			usersHost[tHost] = tUsers
 		} else {
+			// 对连接上的user分组 - 即对user按照msggateway节点连接定向推送
 			usersHost[tHost] = []string{v}
 		}
 	}

@@ -126,6 +126,7 @@ func (c *Client) pongHandler(_ string) error {
 	return nil
 }
 
+// 长连接接收消息处理
 // readMessage continuously reads messages from the connection.
 func (c *Client) readMessage() {
 	defer func() {
@@ -186,6 +187,7 @@ func (c *Client) readMessage() {
 	}
 }
 
+// 处理接收的长连接二进制消息
 // handleMessage processes a single message received by the client.
 func (c *Client) handleMessage(message []byte) error {
 	if c.IsCompress {
@@ -226,7 +228,7 @@ func (c *Client) handleMessage(message []byte) error {
 	switch binaryReq.ReqIdentifier {
 	case WSGetNewestSeq:
 		resp, messageErr = c.longConnServer.GetSeq(ctx, binaryReq)
-	case WSSendMsg:
+	case WSSendMsg: // 接收长连接消息，进行转发
 		resp, messageErr = c.longConnServer.SendMessage(ctx, binaryReq)
 	case WSSendSignalMsg:
 		resp, messageErr = c.longConnServer.SendSignalMessage(ctx, binaryReq)

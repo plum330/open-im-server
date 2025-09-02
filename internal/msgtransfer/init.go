@@ -122,10 +122,12 @@ func Start(ctx context.Context, config *Config, client discovery.SvcDiscoveryReg
 	if err != nil {
 		return err
 	}
+	// 接收来自msg模块的MQ消息存储到redis(因为redis是内存数据库，存储快，能保证消息发送通路低时延)
 	historyConsumer, err := builder.GetTopicConsumer(ctx, config.KafkaConfig.ToRedisTopic)
 	if err != nil {
 		return err
 	}
+	// 接收msgtransfer模块的MQ消息持久化消息到Mongo(该消息是msgtransfer自产自消的消息)
 	historyMongoConsumer, err := builder.GetTopicConsumer(ctx, config.KafkaConfig.ToMongoTopic)
 	if err != nil {
 		return err
@@ -152,6 +154,7 @@ func (m *MsgTransfer) Start(ctx context.Context) error {
 
 	go func() {
 		for {
+			// 接收来自msg模块的MQ消息
 			if err := m.historyConsumer.Subscribe(m.ctx, m.historyHandler.HandlerRedisMessage); err != nil {
 				cancel(fmt.Errorf("history consumer %w", err))
 				log.ZError(m.ctx, "historyConsumer err", err)
@@ -166,6 +169,7 @@ func (m *MsgTransfer) Start(ctx context.Context) error {
 			return nil
 		}
 		for {
+			// 接收批量插入到redis后的需要存储的消息组，进行mongo持久化
 			if err := m.historyMongoConsumer.Subscribe(m.ctx, fn); err != nil {
 				cancel(fmt.Errorf("history mongo consumer %w", err))
 				log.ZError(m.ctx, "historyMongoConsumer err", err)
@@ -174,8 +178,10 @@ func (m *MsgTransfer) Start(ctx context.Context) error {
 		}
 	}()
 
+	// 处理消息发送者已读消息
 	go m.historyHandler.HandleUserHasReadSeqMessages(m.ctx)
 
+	// 处理通道中的消息
 	err := m.historyHandler.redisMessageBatches.Start()
 	if err != nil {
 		return err

@@ -1783,6 +1783,8 @@ func (g *groupServer) GetUserInGroupMembers(ctx context.Context, req *pbgroup.Ge
 	}, nil
 }
 
+// 在group模块中获取群成员
+
 func (g *groupServer) GetGroupMemberUserIDs(ctx context.Context, req *pbgroup.GetGroupMemberUserIDsReq) (*pbgroup.GetGroupMemberUserIDsResp, error) {
 	userIDs, err := g.db.FindGroupMemberUserID(ctx, req.GroupID)
 	if err != nil {

@@ -133,6 +133,7 @@ func (s *Server) GetUsersOnlineStatus(ctx context.Context, req *msggateway.GetUs
 }
 
 func (s *Server) pushToUser(ctx context.Context, userID string, msgData *sdkws.MsgData) *msggateway.SingleMsgToUserResults {
+	// 获取用户的长连接客户端 - user_id: []clients (不同平台platform)
 	clients, ok := s.LongConnServer.GetUserAllCons(userID)
 	if !ok {
 		log.ZDebug(ctx, "push user not online", "userID", userID)

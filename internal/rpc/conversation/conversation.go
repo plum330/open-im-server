@@ -378,6 +378,8 @@ func (c *conversationServer) UpdateConversationsByUser(ctx context.Context, req 
 	return &pbconversation.UpdateConversationsByUserResp{}, nil
 }
 
+// 创建私聊会话
+
 // create conversation without notification for msg redis transfer.
 func (c *conversationServer) CreateSingleChatConversations(ctx context.Context, req *pbconversation.CreateSingleChatConversationsReq) (*pbconversation.CreateSingleChatConversationsResp, error) {
 	var conversation dbModel.Conversation
@@ -438,6 +440,8 @@ func (c *conversationServer) CreateSingleChatConversations(ctx context.Context, 
 	return &pbconversation.CreateSingleChatConversationsResp{}, nil
 }
 
+// 创建群会话
+
 func (c *conversationServer) CreateGroupChatConversations(ctx context.Context, req *pbconversation.CreateGroupChatConversationsReq) (*pbconversation.CreateGroupChatConversationsResp, error) {
 	var conversation dbModel.Conversation
 
@@ -454,6 +458,7 @@ func (c *conversationServer) CreateGroupChatConversations(ctx context.Context, r
 	if err != nil {
 		return nil, err
 	}
+	// 设置会话的消息序列号
 	if err := c.msgClient.SetUserConversationMaxSeq(ctx, conversation.ConversationID, req.UserIDs, 0); err != nil {
 		return nil, err
 	}

@@ -243,6 +243,8 @@ return 0
 	return result, nil
 }
 
+// 通过redis lua脚本分配会话的序列号（以下lua脚本实现了一个分布式序列号生成与管理系统 - 批量发号器）
+// 返回的结果是{状态, curr_seq, last_seq, 分配时间}这样一个int64数组， 分配后同时也是把last_seq保存到redis了的，作为下一次分配的起点。
 // malloc size=0 is to get the current seq size>0 is to allocate seq
 func (s *seqConversationCacheRedis) malloc(ctx context.Context, key string, size int64) ([]int64, error) {
 	// 0: success
@@ -363,6 +365,8 @@ func (s *seqConversationCacheRedis) getMallocSize(conversationID string, size in
 	return basicSize
 }
 
+// 从redis分配conversation seq - 返回当前序列号(即会话上一次的消息序列号)
+
 func (s *seqConversationCacheRedis) Malloc(ctx context.Context, conversationID string, size int64) (int64, error) {
 	seq, _, err := s.mallocTime(ctx, conversationID, size)
 	return seq, err
@@ -380,6 +384,7 @@ func (s *seqConversationCacheRedis) mallocTime(ctx context.Context, conversation
 		}
 		switch states[0] {
 		case 0: // success
+			// 当前序列号curr_seq， 最后一个序列号last_seq
 			return states[1], states[3], nil
 		case 1: // not found
 			mallocSize := s.getMallocSize(conversationID, size)

@@ -88,6 +88,7 @@ func (ws *WsServer) ChangeOnlineStatus(concurrent int) {
 		opIdCtx := mcontext.SetOperationID(context.Background(), operationIDPrefix+strconv.FormatInt(count.Add(1), 10))
 		ctx, cancel := context.WithTimeout(opIdCtx, time.Second*5)
 		defer cancel()
+		// msggateway调用修改上下线状态 - msggateway调用user模块通过redis发布用户状态
 		if err := ws.userClient.SetUserOnlineStatus(ctx, req); err != nil {
 			log.ZError(ctx, "update user online status", err)
 		}

@@ -71,6 +71,7 @@ func NewOnlineCache(client *rpcli.UserClient, group *GroupLocalCache, rdb redis.
 	}
 	if rdb != nil {
 		go func() {
+			// 用户上下线本都缓存处理
 			x.doSubscribe(ctx, rdb, fn)
 		}()
 	}
@@ -148,6 +149,7 @@ func (o *defaultOnlineCache) initUsersOnlineStatus(ctx context.Context) (err err
 
 func (o *defaultOnlineCache) doSubscribe(ctx context.Context, rdb redis.UniversalClient, fn func(ctx context.Context, userID string, platformIDs []int32)) {
 	o.Lock.Lock()
+	// 用户上下线通过redis pubsub通知
 	ch := rdb.Subscribe(ctx, cachekey.OnlineChannel).Channel()
 	for o.CurrentPhase.Load() < DoOnlineStatusOver {
 		o.Cond.Wait()
@@ -156,6 +158,7 @@ func (o *defaultOnlineCache) doSubscribe(ctx context.Context, rdb redis.Universa
 	log.ZInfo(ctx, "begin doSubscribe")
 
 	doMessage := func(message *redis.Message) {
+		// 解析用户及其在线状态
 		userID, platformIDs, err := useronline.ParseUserOnlineStatus(message.Payload)
 		if err != nil {
 			log.ZError(ctx, "OnlineCache setHasUserOnline redis subscribe parseUserOnlineStatus", err, "payload", message.Payload, "channel", message.Channel)
@@ -164,6 +167,7 @@ func (o *defaultOnlineCache) doSubscribe(ctx context.Context, rdb redis.Universa
 		log.ZDebug(ctx, fmt.Sprintf("get subscribe %s message", cachekey.OnlineChannel), "useID", userID, "platformIDs", platformIDs)
 		switch o.fullUserCache {
 		case true:
+			// 更新用户在线信息缓存 - sync.map
 			if len(platformIDs) == 0 {
 				// offline
 				o.mapCache.Delete(userID)
@@ -171,6 +175,7 @@ func (o *defaultOnlineCache) doSubscribe(ctx context.Context, rdb redis.Universa
 				o.mapCache.Store(userID, platformIDs)
 			}
 		case false:
+			// 更新用户在线信息缓存 - lru
 			storageCache := o.setHasUserOnline(userID, platformIDs)
 			log.ZDebug(ctx, "OnlineCache setHasUserOnline", "userID", userID, "platformIDs", platformIDs, "payload", message.Payload, "storageCache", storageCache)
 			if fn != nil {
@@ -251,6 +256,8 @@ func (o *defaultOnlineCache) getUserOnlinePlatformBatch(ctx context.Context, use
 	return platformIDsMap, nil
 }
 
+// 查询在线 / 离线用户
+
 func (o *defaultOnlineCache) GetUsersOnline(ctx context.Context, userIDs []string) ([]string, []string, error) {
 	t := time.Now()
 
@@ -259,6 +266,7 @@ func (o *defaultOnlineCache) GetUsersOnline(ctx context.Context, userIDs []strin
 		offlineUserIDs = make([]string, 0, len(userIDs))
 	)
 
+	// fullUserCache - true表示在内存中用sync.map缓存全部的在线用户, false表示用lru缓存一部分在线用户
 	switch o.fullUserCache {
 	case true:
 		for _, userID := range userIDs {

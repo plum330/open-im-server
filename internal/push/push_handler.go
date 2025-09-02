@@ -85,6 +85,8 @@ func NewConsumerHandler(ctx context.Context, config *Config, database controller
 	return &consumerHandler, nil
 }
 
+// 处理消息并推送 - 单条消息
+
 func (c *ConsumerHandler) HandleMs2PsChat(ctx context.Context, msg []byte) {
 	msgFromMQ := pbpush.PushMsgReq{}
 	if err := proto.Unmarshal(msg, &msgFromMQ); err != nil {
@@ -95,6 +97,7 @@ func (c *ConsumerHandler) HandleMs2PsChat(ctx context.Context, msg []byte) {
 	sec := msgFromMQ.MsgData.SendTime / 1000
 	nowSec := timeutil.GetCurrentTimestampBySecond()
 
+	// 消息发送时间和当前时间相差10s
 	if nowSec-sec > 10 {
 		prommetrics.MsgLoneTimePushCounter.Inc()
 		log.ZWarn(ctx, "it’s been a while since the message was sent", nil, "msg", msgFromMQ.String(), "sec", sec, "nowSec", nowSec, "nowSec-sec", nowSec-sec)
@@ -103,6 +106,7 @@ func (c *ConsumerHandler) HandleMs2PsChat(ctx context.Context, msg []byte) {
 
 	switch msgFromMQ.MsgData.SessionType {
 	case constant.ReadGroupChatType:
+		// 推送群消息
 		err = c.Push2Group(ctx, msgFromMQ.MsgData.GroupID, msgFromMQ.MsgData)
 	default:
 		var pushUserIDList []string
@@ -112,6 +116,7 @@ func (c *ConsumerHandler) HandleMs2PsChat(ctx context.Context, msg []byte) {
 		} else {
 			pushUserIDList = append(pushUserIDList, msgFromMQ.MsgData.RecvID, msgFromMQ.MsgData.SendID)
 		}
+		// 推送非群消息， 如私聊
 		err = c.Push2User(ctx, pushUserIDList, msgFromMQ.MsgData)
 	}
 	if err != nil {
@@ -122,6 +127,8 @@ func (c *ConsumerHandler) HandleMs2PsChat(ctx context.Context, msg []byte) {
 func (c *ConsumerHandler) WaitCache() {
 	c.onlineCache.WaitCache()
 }
+
+// 私聊推送
 
 // Push2User Suitable for two types of conversations, one is SingleChatType and the other is NotificationChatType.
 func (c *ConsumerHandler) Push2User(ctx context.Context, userIDs []string, msg *sdkws.MsgData) (err error) {
@@ -196,6 +203,7 @@ func (c *ConsumerHandler) GetConnsAndOnlinePush(ctx context.Context, msg *sdkws.
 	if msg != nil && msg.Status == constant.MsgStatusSending {
 		msg.Status = constant.MsgStatusSendSuccess
 	}
+	// 查询在线/离线成员 - 本地缓存
 	onlineUserIDs, offlineUserIDs, err := c.onlineCache.GetUsersOnline(ctx, pushToUserIDs)
 	if err != nil {
 		return nil, err
@@ -205,6 +213,7 @@ func (c *ConsumerHandler) GetConnsAndOnlinePush(ctx context.Context, msg *sdkws.
 	var result []*msggateway.SingleMsgToUserResults
 	if len(onlineUserIDs) > 0 {
 		var err error
+		// 获取在线用户连接并推送
 		result, err = c.onlinePusher.GetConnsAndOnlinePush(ctx, msg, onlineUserIDs)
 		if err != nil {
 			return nil, err
@@ -218,6 +227,8 @@ func (c *ConsumerHandler) GetConnsAndOnlinePush(ctx context.Context, msg *sdkws.
 	return result, nil
 }
 
+// 群消息推送 - 单条消息
+
 func (c *ConsumerHandler) Push2Group(ctx context.Context, groupID string, msg *sdkws.MsgData) (err error) {
 	log.ZInfo(ctx, "Get group msg from msg_transfer and push msg", "msg", msg.String(), "groupID", groupID)
 	defer func(duration time.Time) {
@@ -230,11 +241,13 @@ func (c *ConsumerHandler) Push2Group(ctx context.Context, groupID string, msg *s
 		return err
 	}
 
+	// 从本地缓存查询群成员
 	err = c.groupMessagesHandler(ctx, groupID, &pushToUserIDs, msg)
 	if err != nil {
 		return err
 	}
 
+	// 推送给在线的群成员
 	wsResults, err := c.GetConnsAndOnlinePush(ctx, msg, pushToUserIDs)
 	if err != nil {
 		return err
@@ -283,8 +296,10 @@ func (c *ConsumerHandler) asyncOfflinePush(ctx context.Context, needOfflinePushU
 	}
 }
 
+// 组装需要推送的用户
 func (c *ConsumerHandler) groupMessagesHandler(ctx context.Context, groupID string, pushToUserIDs *[]string, msg *sdkws.MsgData) (err error) {
 	if len(*pushToUserIDs) == 0 {
+		// 获取群成员 - 从本地缓存获取
 		*pushToUserIDs, err = c.groupLocalCache.GetGroupMemberIDs(ctx, groupID)
 		if err != nil {
 			return err

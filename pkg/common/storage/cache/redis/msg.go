@@ -77,6 +77,8 @@ func (c *msgCache) DelMessageBySeqs(ctx context.Context, conversationID string, 
 	return nil
 }
 
+// 按照会话ID和对应的序列号seq，把消息一条条保存到redis（string类型 - conversation_id 和 seq作为key, 过期时间24H）
+
 func (c *msgCache) SetMessageBySeqs(ctx context.Context, conversationID string, msgs []*model.MsgInfoModel) error {
 	for _, msg := range msgs {
 		if msg == nil || msg.Msg == nil || msg.Msg.Seq <= 0 {

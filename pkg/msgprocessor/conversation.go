@@ -48,6 +48,7 @@ func GetNotificationConversationIDByMsg(msg *sdkws.MsgData) string {
 
 func GetChatConversationIDByMsg(msg *sdkws.MsgData) string {
 	switch msg.SessionType {
+	// 对于一个私聊会话，不管是哪个发送者，这个会话的ID都是固定的，因为是按照如何规则生成的
 	case constant.SingleChatType:
 		l := []string{msg.SendID, msg.RecvID}
 		sort.Strings(l)
@@ -95,6 +96,8 @@ func GetConversationIDByMsg(msg *sdkws.MsgData) string {
 	}
 	return ""
 }
+
+// 会话ID - conversation id生成规则
 
 func GetConversationIDBySessionType(sessionType int, ids ...string) string {
 	sort.Strings(ids)

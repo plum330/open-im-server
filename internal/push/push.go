@@ -2,9 +2,10 @@ package push
 
 import (
 	"context"
-	"github.com/openimsdk/tools/mq"
 	"math/rand"
 	"strconv"
+
+	"github.com/openimsdk/tools/mq"
 
 	"github.com/openimsdk/open-im-server/v3/internal/push/offlinepush"
 	"github.com/openimsdk/open-im-server/v3/pkg/authverify"
@@ -83,6 +84,7 @@ func Start(ctx context.Context, config *Config, client discovery.SvcDiscoveryReg
 	}
 	database := controller.NewPushDatabase(cacheModel, offlinePushProducer)
 
+	// 接收来自msgtransfer模块的消息，进行推送（私聊/群聊）
 	pushConsumer, err := builder.GetTopicConsumer(ctx, config.KafkaConfig.ToPushTopic)
 	if err != nil {
 		return err
@@ -114,6 +116,7 @@ func Start(ctx context.Context, config *Config, client discovery.SvcDiscoveryReg
 		consumerCtx := mcontext.SetOperationID(context.Background(), "push_"+strconv.Itoa(int(rand.Uint32())))
 		log.ZInfo(consumerCtx, "begin consume messages")
 		for {
+			// 接收来自msgtransfer模块的未拆分消息进行推送 - msgtransfer已经是把消息分成单条发过来的
 			if err := pushConsumer.Subscribe(consumerCtx, fn); err != nil {
 				log.ZError(consumerCtx, "subscribe err", err)
 				return

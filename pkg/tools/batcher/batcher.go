@@ -102,6 +102,7 @@ func New[T any](opts ...Option) *Batcher[T] {
 		opt(config)
 	}
 	b.config = config
+	// 初始化消息通道
 	b.data = make(chan *T, DefaultDataChanSize)
 	b.globalCtx, b.cancel = context.WithCancel(context.Background())
 
@@ -127,10 +128,13 @@ func (b *Batcher[T]) Start() error {
 		return errs.New("Key function is required").Wrap()
 	}
 	b.wait.Add(b.config.worker)
+	// 初始化channel数组
 	for i := 0; i < b.config.worker; i++ {
+		// 每个channel对应一个goroutine独占处理通道消息组，保证消息的顺序性
 		go b.run(i, b.chArrays[i])
 	}
 	b.wait.Add(1)
+	// 调度处理消息通道
 	go b.scheduler()
 	return nil
 }
@@ -144,7 +148,7 @@ func (b *Batcher[T]) Put(ctx context.Context, data *T) error {
 		return errs.New("data channel is closed").Wrap()
 	case <-ctx.Done():
 		return ctx.Err()
-	case b.data <- data:
+	case b.data <- data: // 把消息写入通道
 		return nil
 	}
 }
@@ -160,13 +164,14 @@ func (b *Batcher[T]) scheduler() {
 		b.wait.Done()
 	}()
 
+	// 按照MQ消息的key对消息进行分类合并，进行批量处理
 	vals := make(map[string][]*T)
 	count := 0
 	var lastAny *T
 
 	for {
 		select {
-		case data, ok := <-b.data:
+		case data, ok := <-b.data: // 读取通道中的消息
 			if !ok {
 				// If the data channel is closed unexpectedly
 				return
@@ -178,19 +183,20 @@ func (b *Batcher[T]) scheduler() {
 				return
 			}
 
+			// 分类合并消息
 			key := b.Key(data)
 			vals[key] = append(vals[key], data)
 			lastAny = data
 
 			count++
-			if count >= b.config.size {
+			if count >= b.config.size { // 对指定数量大小的消息进行合并分类处理
 
 				b.distributeMessage(vals, count, lastAny)
 				vals = make(map[string][]*T)
 				count = 0
 			}
 
-		case <-ticker.C:
+		case <-ticker.C: // 批量处理一段时间的消息(对固定时间的消息合并分类)
 			if count > 0 {
 
 				b.distributeMessage(vals, count, lastAny)
@@ -234,6 +240,8 @@ func (m Msg[T]) String() string {
 	return sb.String()
 }
 
+// 对分类合并的消息进行分发
+
 func (b *Batcher[T]) distributeMessage(messages map[string][]*T, totalCount int, lastMessage *T) {
 	triggerID := idutil.OperationIDGenerator()
 	b.HookFunc(triggerID, messages, totalCount, lastMessage)
@@ -241,6 +249,7 @@ func (b *Batcher[T]) distributeMessage(messages map[string][]*T, totalCount int,
 		if b.config.syncWait {
 			b.counter.Add(1)
 		}
+		// 对消息组的key进行分片映射到不同的channel(因为前面对消息进行按照key分类分组，这样相同key的消息就行分配到同一个channel，保证消息的顺序性)，每个channel有单独的goroutine处理
 		channelID := b.Sharding(key)
 		b.chArrays[channelID] <- &Msg[T]{key: key, triggerID: triggerID, val: data}
 	}
@@ -252,11 +261,13 @@ func (b *Batcher[T]) distributeMessage(messages map[string][]*T, totalCount int,
 	}
 }
 
+// 这里的参数 channelID是通道channel的编号0 1 2 3 ...
 func (b *Batcher[T]) run(channelID int, ch <-chan *Msg[T]) {
 	defer b.wait.Done()
 	ctx := authverify.WithTempAdmin(context.Background())
 	for {
 		select {
+		// goroutine读取channel中的消息组
 		case messages, ok := <-ch:
 			if !ok {
 				return

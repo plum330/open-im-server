@@ -178,6 +178,8 @@ func (g *GroupCacheRedis) DelGroupMembersHash(groupID string) cache.GroupCache {
 	return cache
 }
 
+// 从redis中获取群成员(rockscache - 过期时间12H) -> mongo查询全部群成员
+
 func (g *GroupCacheRedis) GetGroupMemberIDs(ctx context.Context, groupID string) (groupMemberIDs []string, err error) {
 	return getCache(ctx, g.rcClient, g.getGroupMemberIDsKey(groupID), g.expireTime, func(ctx context.Context) ([]string, error) {
 		return g.groupMemberDB.FindMemberUserID(ctx, groupID)

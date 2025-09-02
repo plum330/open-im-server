@@ -87,6 +87,8 @@ func (s *userOnline) GetAllOnlineUsers(ctx context.Context, cursor uint64) (map[
 	return result, nextCursor, nil
 }
 
+// 设置用户上下线状态到redis channel中
+
 func (s *userOnline) SetUserOnline(ctx context.Context, userID string, online, offline []int32) error {
 	script := `
 	local key = KEYS[1]
@@ -133,6 +135,7 @@ func (s *userOnline) SetUserOnline(ctx context.Context, userID string, online, o
 		log.ZDebug(ctx, "redis SetUserOnline push", "userID", userID, "online", online, "offline", offline, "platformIDs", platformIDs[:len(platformIDs)-1])
 		platformIDs[len(platformIDs)-1] = userID
 		msg := strings.Join(platformIDs, ":")
+		// 发布用户上下线消息到redis channel中，以便push模块和msggateway模块订阅 - 上下线状态变更不重要所以用redis而不是用MQ ？
 		if err := s.rdb.Publish(ctx, s.channelName, msg).Err(); err != nil {
 			return errs.Wrap(err)
 		}

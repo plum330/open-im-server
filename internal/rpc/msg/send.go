@@ -34,6 +34,8 @@ import (
 	"github.com/openimsdk/tools/utils/datautil"
 )
 
+// rpc msg模块发送消息(来自msggateway)
+
 func (m *msgServer) SendMsg(ctx context.Context, req *pbmsg.SendMsgReq) (*pbmsg.SendMsgResp, error) {
 	if req.MsgData == nil {
 		return nil, errs.ErrArgs.WrapMsg("msgData is nil")
@@ -55,11 +57,11 @@ func (m *msgServer) SendMsg(ctx context.Context, req *pbmsg.SendMsgReq) (*pbmsg.
 func (m *msgServer) sendMsg(ctx context.Context, req *pbmsg.SendMsgReq, before **sdkws.MsgData) (*pbmsg.SendMsgResp, error) {
 	m.encapsulateMsgData(req.MsgData)
 	switch req.MsgData.SessionType {
-	case constant.SingleChatType:
+	case constant.SingleChatType: // 私聊
 		return m.sendMsgSingleChat(ctx, req, before)
 	case constant.NotificationChatType:
 		return m.sendMsgNotification(ctx, req, before)
-	case constant.ReadGroupChatType:
+	case constant.ReadGroupChatType: // 群发 - V3所有的群都采用读扩散方式，减少消息存储占用和MQ消息流量放大
 		return m.sendMsgGroupChat(ctx, req, before)
 	default:
 		return nil, errs.ErrArgs.WrapMsg("unknown sessionType")
@@ -78,10 +80,13 @@ func (m *msgServer) sendMsgGroupChat(ctx context.Context, req *pbmsg.SendMsgReq,
 	if err := m.webhookBeforeMsgModify(ctx, &m.config.WebhooksConfig.BeforeMsgModify, req, before); err != nil {
 		return nil, err
 	}
+	// 通过MQ(topic: config.KafkaConfig.ToRedisTopic)发送消息到msgtransfer - 每个topic都是单独的producer和consumer / consumer group
+	// 因为是读扩散，所以群发消息也是发送一条消息到MQ
 	err = m.MsgDatabase.MsgToMQ(ctx, conversationutil.GenConversationUniqueKeyForGroup(req.MsgData.GroupID), req.MsgData)
 	if err != nil {
 		return nil, err
 	}
+	// @消息处理
 	if req.MsgData.ContentType == constant.AtText {
 		go m.setConversationAtInfo(ctx, req.MsgData)
 	}
@@ -170,6 +175,8 @@ func (m *msgServer) sendMsgNotification(ctx context.Context, req *pbmsg.SendMsgR
 	return resp, nil
 }
 
+// 私聊
+
 func (m *msgServer) sendMsgSingleChat(ctx context.Context, req *pbmsg.SendMsgReq, before **sdkws.MsgData) (resp *pbmsg.SendMsgResp, err error) {
 	if err := m.messageVerification(ctx, req); err != nil {
 		return nil, err
@@ -189,6 +196,7 @@ func (m *msgServer) sendMsgSingleChat(ctx context.Context, req *pbmsg.SendMsgReq
 		if err := m.webhookBeforeMsgModify(ctx, &m.config.WebhooksConfig.BeforeMsgModify, req, before); err != nil {
 			return nil, err
 		}
+		// 通过MQ(topic: config.KafkaConfig.ToRedisTopic)发送消息到msgtransfer - 每个topic都是单独的producer和consumer / consumer group
 		if err := m.MsgDatabase.MsgToMQ(ctx, conversationutil.GenConversationUniqueKeyForSingle(req.MsgData.SendID, req.MsgData.RecvID), req.MsgData); err != nil {
 			prommetrics.SingleChatMsgProcessFailedCounter.Inc()
 			return nil, err
