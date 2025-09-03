@@ -395,6 +395,7 @@ func (och *OnlineHistoryRedisConsumerHandler) Close() {
 }
 
 func (och *OnlineHistoryRedisConsumerHandler) toPushTopic(ctx context.Context, key, conversationID string, msgs []*ContextMsg) {
+	// 这些消息都是属于同一个会话conversation的，为什么不批量发送到push模块，而要单条发送？？？
 	for _, v := range msgs {
 		log.ZDebug(ctx, "push msg to topic", "msg", v.message.String())
 		if err := och.msgTransferDatabase.MsgToPushMQ(v.ctx, key, conversationID, v.message); err != nil {

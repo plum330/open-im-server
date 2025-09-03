@@ -114,6 +114,10 @@ func (m *MsgDocModel) GetDocIndex(seq int64) int64 {
 }
 
 func (m *MsgDocModel) GetDocID(conversationID string, seq int64) string {
+	// 因为每次的消息数组最大是singleGocMsgNum（100）条，这样比如第一组消息的消息序列号是从1 -> 100, 这样seq / singleGocMsgNum后，第一个doc记录中只会填入99条消息，而不是100条
+	// seq - 1后，那么第一组消息序列号就相当于是从0 -> 99， 那么计算后可以全部填充到第一条doc记录中
+	// seqSuffix表示会话conversation相关的第几条doc （因为每条记录中设计的是最多存放100条消息，那么每个会话conversation肯定会占用多个doc来存储）
+	// doc_id是按照规则固定生成的字符串
 	seqSuffix := (seq - 1) / singleGocMsgNum
 	return m.indexGen(conversationID, seqSuffix)
 }
@@ -129,6 +133,7 @@ func (m *MsgDocModel) GetDocIDSeqsMap(conversationID string, seqs []int64) map[s
 }
 
 func (*MsgDocModel) GetMsgIndex(seq int64) int64 {
+	// 取余计算本条消息在数组中的位置
 	return (seq - 1) % singleGocMsgNum
 }
 

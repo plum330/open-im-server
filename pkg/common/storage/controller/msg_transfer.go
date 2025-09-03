@@ -127,6 +127,10 @@ func (db *msgTransferDatabase) BatchInsertBlock(ctx context.Context, conversatio
 			err error
 		)
 		// 因为消息在mongo中是分组（按照数组）存储到mongo的一条记录中 - 这样将消息按照数组存储到mongo记录中，相比单条消息存储一条记录，可以减少mongo索引的开销
+		/*
+			1. 通过conversation_id和seq计算doc_id，表示放在哪条记录 -> GetDocID
+			2. 通过seq计算index，表示放在记录数组中的第几个元素上 -> GetMsgIndex
+		*/
 		docID := db.msgTable.GetDocID(conversationID, seq)
 		index := db.msgTable.GetMsgIndex(seq)
 		field := fields[i]
@@ -219,7 +223,7 @@ func (db *msgTransferDatabase) BatchInsertChat2Cache(ctx context.Context, conver
 	if lenList < 1 {
 		return 0, false, nil, errs.New("no messages to insert", "minCount", 1).Wrap()
 	}
-	// 分配会话序列号seq，从0开始（从redis分配 - currentMaxSeq是当前会话的上一次消息的序列号）
+	// 分配会话序列号seq，从0（currentMaxSeq从0开始）开始（从redis分配 - currentMaxSeq是当前会话的上一次消息的序列号）
 	currentMaxSeq, err := db.seqConversation.Malloc(ctx, conversationID, int64(len(msgs)))
 	if err != nil {
 		log.ZError(ctx, "storage.seq.Malloc", err)
@@ -231,7 +235,7 @@ func (db *msgTransferDatabase) BatchInsertChat2Cache(ctx context.Context, conver
 	userSeqMap := make(map[string]int64)
 	seqs := make([]int64, 0, lenList)
 	for _, m := range msgs {
-		// 会话序列号连续累加递增
+		// 会话序列号连续累加递增，说明会话的序列号是从1开始连续增加的
 		currentMaxSeq++
 		// 把分配的序列号塞入到消息中
 		m.Seq = currentMaxSeq
