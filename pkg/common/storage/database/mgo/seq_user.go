@@ -3,6 +3,7 @@ package mgo
 import (
 	"context"
 	"errors"
+
 	"github.com/openimsdk/open-im-server/v3/pkg/common/storage/database"
 	"github.com/openimsdk/open-im-server/v3/pkg/common/storage/model"
 	"github.com/openimsdk/tools/db/mongoutil"
@@ -46,6 +47,7 @@ func (s *seqUserMongo) setSeq(ctx context.Context, conversationID string, userID
 		"$set": bson.M{
 			field: seq,
 		},
+		//  如果upsert设为true。当满足查询条件的记录存在，则不执行$setOnInsert中的操作，当满足条件的记录不存在则执行$setOnInsert操作，将指定的值分配给文档中的字段。
 		"$setOnInsert": insert,
 	}
 	opt := options.Update().SetUpsert(true)
@@ -115,6 +117,7 @@ func (s *seqUserMongo) GetUserReadSeqs(ctx context.Context, userID string, conve
 }
 
 func (s *seqUserMongo) SetUserReadSeq(ctx context.Context, conversationID string, userID string, seq int64) error {
+	// 读取mongo中会话消息已读的seq
 	dbSeq, err := s.GetUserReadSeq(ctx, conversationID, userID)
 	if err != nil {
 		return err
@@ -122,5 +125,6 @@ func (s *seqUserMongo) SetUserReadSeq(ctx context.Context, conversationID string
 	if dbSeq > seq {
 		return nil
 	}
+	// 更新已读序列号read_seq
 	return s.setSeq(ctx, conversationID, userID, seq, "read_seq")
 }

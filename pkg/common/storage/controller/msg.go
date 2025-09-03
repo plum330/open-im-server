@@ -573,6 +573,8 @@ func (db *commonMsgDatabase) SetUserConversationsMinSeqs(ctx context.Context, us
 	return db.seqUser.SetUserMinSeqs(ctx, userID, seqs)
 }
 
+// 设置会话中用户最大的序列号
+
 func (db *commonMsgDatabase) SetUserConversationsMaxSeq(ctx context.Context, conversationID string, userID string, seq int64) error {
 	return db.seqUser.SetUserMaxSeq(ctx, conversationID, userID, seq)
 }

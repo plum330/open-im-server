@@ -72,7 +72,7 @@ func Main(conf string, del time.Duration) error {
 	if err != nil {
 		return err
 	}
-	
+
 	mongodbConfig, err := readConfig[config.Mongo](conf, config.MongodbConfigFileName)
 	if err != nil {
 		return err
@@ -128,6 +128,16 @@ func Main(conf string, del time.Duration) error {
 		return
 	}
 
+	/*
+		1. 序列号先存入redis，再通过任务异步落库
+		2. 发送消息过程中，消息先存入redis，再通过MQ异步落库
+		以上二者都先存入redis都是为了速度快，落库方式的差异在于是否容忍数据丢失/数据的重要性：
+			消息序列号主要用于标记消息在整个会话中的位置，或者标记已读消息读到哪里了，或者标记消息的读取位置，序列号相比于消息本身，即是序列号丢失/更新失败，但是消息本省是存在的，就不会有问题，所以可以通过异步任务的方式落库
+			消息自身是非常重要的，最好做到不丢失，那么通过MQ异步落库，是可以保证的。因为kafka自身可以保证高可用。
+
+	*/
+
+	// 序列号异步任务
 	ts := []*taskSeq{
 		{
 			Prefix: MaxSeq,
@@ -184,6 +194,7 @@ func Main(conf string, del time.Duration) error {
 	for i := range ts {
 		go func(task *taskSeq) {
 			defer wg.Done()
+			// 通过任务goroutine的方式来把redis中的数据持久化到mongo
 			err := seqRedisToMongo(ctx, rdb, task.GetSeq, task.SetSeq, task.Prefix, del, &task.Count)
 			task.End = time.Now()
 			task.Error = err
@@ -267,11 +278,13 @@ func seqRedisToMongo(ctx context.Context, rdb redis.UniversalClient, getSeq func
 		err    error
 	)
 	for {
+		// 模糊查询指定前缀的redis key
 		keys, cursor, err = rdb.Scan(ctx, cursor, prefix+"*", batchSize).Result()
 		if err != nil {
 			return err
 		}
 		if len(keys) > 0 {
+			// 遍历查找到的redis key
 			for _, key := range keys {
 				seqStr, err := rdb.Get(ctx, key).Result()
 				if err != nil {
@@ -290,6 +303,7 @@ func seqRedisToMongo(ctx context.Context, rdb redis.UniversalClient, getSeq func
 				if err != nil {
 					return fmt.Errorf("get mongo seq %s failed %w", key, err)
 				}
+				// 当mongo中的seq < redis中存储的seq时更新到mongo
 				if mongoSeq < redisSeq {
 					if err := setSeq(ctx, id, redisSeq); err != nil {
 						return fmt.Errorf("set mongo seq %s failed %w", key, err)

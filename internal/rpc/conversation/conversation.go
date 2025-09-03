@@ -458,7 +458,7 @@ func (c *conversationServer) CreateGroupChatConversations(ctx context.Context, r
 	if err != nil {
 		return nil, err
 	}
-	// 设置会话的消息序列号
+	// 设置会话的消息序列号 - 创建群会话设置所有用户的max_seq = 0
 	if err := c.msgClient.SetUserConversationMaxSeq(ctx, conversation.ConversationID, req.UserIDs, 0); err != nil {
 		return nil, err
 	}

@@ -48,6 +48,8 @@ func (s *seqUserCacheRedis) GetUserMaxSeq(ctx context.Context, conversationID st
 	})
 }
 
+// 设置会话中用户最大的序列号 - rockscache 和 mongo存储
+
 func (s *seqUserCacheRedis) SetUserMaxSeq(ctx context.Context, conversationID string, userID string, seq int64) error {
 	if err := s.mgo.SetUserMaxSeq(ctx, conversationID, userID, seq); err != nil {
 		return err
@@ -71,15 +73,20 @@ func (s *seqUserCacheRedis) GetUserReadSeq(ctx context.Context, conversationID s
 	})
 }
 
+// 设置会话中用户已读的消息seq
+
 func (s *seqUserCacheRedis) SetUserReadSeq(ctx context.Context, conversationID string, userID string, seq int64) error {
 	if s.rocks.GetRedis() == nil {
+		// 设置会话消息已读到mongo
 		return s.SetUserReadSeqToDB(ctx, conversationID, userID, seq)
 	}
+	// 从rockscache读取会话用户已读消息seq
 	dbSeq, err := s.GetUserReadSeq(ctx, conversationID, userID)
 	if err != nil {
 		return err
 	}
 	if dbSeq < seq {
+		// 设置已读消息序列号到rockscache, 然后通过任务（seqRedisToMongo）的方式持久化到mongo - 即先存储到redis再异步持久化到mongo，原因还是因为redis快，直接写mongo慢（再者高并发场景下，直接写DB - mongo/mysql，存在数据库并发瓶劲）
 		if err := s.rocks.GetClient().RawSet(ctx, s.getSeqUserReadSeqKey(conversationID, userID), strconv.Itoa(int(seq)), s.readExpireTime); err != nil {
 			return errs.Wrap(err)
 		}
